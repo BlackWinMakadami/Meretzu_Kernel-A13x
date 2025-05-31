@@ -1,9 +1,7 @@
 .. |struct dev_pm_domain| replace:: :c:type:`struct dev_pm_domain <dev_pm_domain>`
 .. |struct generic_pm_domain| replace:: :c:type:`struct generic_pm_domain <generic_pm_domain>`
 
-============
 Device links
-============
 
 By default, the driver core only enforces dependencies between devices
 that are borne out of a parent/child relationship within the device
@@ -104,7 +102,6 @@ Note, however, that any combinations of ``DL_FLAG_AUTOREMOVE_CONSUMER``,
 ``DL_FLAG_STATELESS`` are invalid and cannot be used.
 
 Limitations
-===========
 
 Driver authors should be aware that a driver presence dependency for managed
 device links (i.e. when ``DL_FLAG_STATELESS`` is not specified on link addition)
@@ -136,7 +133,6 @@ based on probe deferral.  In any case optional resources are beyond the
 scope of device links.
 
 Examples
-========
 
 * An MMU device exists alongside a busmaster device, both are in the same
   power domain.  The MMU implements DMA address translation for the busmaster
@@ -182,7 +178,6 @@ Examples
   burst access and compression/decompression.
 
 Alternatives
-============
 
 * A |struct dev_pm_domain| can be used to override the bus,
   class or device type callbacks.  It is intended for devices sharing
@@ -198,7 +193,6 @@ Alternatives
   dependencies.  It also cannot be used on ACPI systems.
 
 Implementation
-==============
 
 The device hierarchy, which -- as the name implies -- is a tree,
 becomes a directed acyclic graph once device links are added.
@@ -237,7 +231,6 @@ add a device flag causing the parent driver to be probed before the
 child one.
 
 State machine
-=============
 
 .. kernel-doc:: include/linux/device.h
    :functions: device_link_state
@@ -264,6 +257,8 @@ State machine
 
 * Before a consumer device is probed, presence of supplier drivers is
   verified by checking that links to suppliers are in ``DL_STATE_AVAILABLE``
+  verified by checking the consumer device is not in the wait_for_suppliers
+  list and by checking that links to suppliers are in ``DL_STATE_AVAILABLE``
   state.  The state of the links is updated to ``DL_STATE_CONSUMER_PROBE``.
   (Call to :c:func:`device_links_check_suppliers()` from
   :c:func:`really_probe()`.)

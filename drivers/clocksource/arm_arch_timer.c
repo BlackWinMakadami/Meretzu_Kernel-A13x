@@ -52,6 +52,8 @@
 #define CNTFRQ		0x10
 #define CNTP_TVAL	0x28
 #define CNTP_CTL	0x2c
+#define CNTCVAL_LO	0x30
+#define CNTCVAL_HI	0x34
 #define CNTV_TVAL	0x38
 #define CNTV_CTL	0x3c
 
@@ -76,6 +78,7 @@ static bool arch_timer_c3stop;
 static bool arch_timer_mem_use_virtual;
 static bool arch_counter_suspend_stop;
 static bool vdso_default = true;
+static bool arch_timer_use_clocksource_only;
 
 static cpumask_t evtstrm_available = CPU_MASK_NONE;
 static bool evtstrm_enable = IS_ENABLED(CONFIG_ARM_ARCH_TIMER_EVTSTREAM);
@@ -98,20 +101,20 @@ void arch_timer_reg_write(int access, enum arch_timer_reg reg, u32 val,
 		struct arch_timer *timer = to_arch_timer(clk);
 		switch (reg) {
 		case ARCH_TIMER_REG_CTRL:
-			writel_relaxed(val, timer->base + CNTP_CTL);
+			writel_relaxed_no_log(val, timer->base + CNTP_CTL);
 			break;
 		case ARCH_TIMER_REG_TVAL:
-			writel_relaxed(val, timer->base + CNTP_TVAL);
+			writel_relaxed_no_log(val, timer->base + CNTP_TVAL);
 			break;
 		}
 	} else if (access == ARCH_TIMER_MEM_VIRT_ACCESS) {
 		struct arch_timer *timer = to_arch_timer(clk);
 		switch (reg) {
 		case ARCH_TIMER_REG_CTRL:
-			writel_relaxed(val, timer->base + CNTV_CTL);
+			writel_relaxed_no_log(val, timer->base + CNTV_CTL);
 			break;
 		case ARCH_TIMER_REG_TVAL:
-			writel_relaxed(val, timer->base + CNTV_TVAL);
+			writel_relaxed_no_log(val, timer->base + CNTV_TVAL);
 			break;
 		}
 	} else {
@@ -129,20 +132,20 @@ u32 arch_timer_reg_read(int access, enum arch_timer_reg reg,
 		struct arch_timer *timer = to_arch_timer(clk);
 		switch (reg) {
 		case ARCH_TIMER_REG_CTRL:
-			val = readl_relaxed(timer->base + CNTP_CTL);
+			val = readl_relaxed_no_log(timer->base + CNTP_CTL);
 			break;
 		case ARCH_TIMER_REG_TVAL:
-			val = readl_relaxed(timer->base + CNTP_TVAL);
+			val = readl_relaxed_no_log(timer->base + CNTP_TVAL);
 			break;
 		}
 	} else if (access == ARCH_TIMER_MEM_VIRT_ACCESS) {
 		struct arch_timer *timer = to_arch_timer(clk);
 		switch (reg) {
 		case ARCH_TIMER_REG_CTRL:
-			val = readl_relaxed(timer->base + CNTV_CTL);
+			val = readl_relaxed_no_log(timer->base + CNTV_CTL);
 			break;
 		case ARCH_TIMER_REG_TVAL:
-			val = readl_relaxed(timer->base + CNTV_TVAL);
+			val = readl_relaxed_no_log(timer->base + CNTV_TVAL);
 			break;
 		}
 	} else {
@@ -896,6 +899,14 @@ static int arch_timer_starting_cpu(unsigned int cpu)
 	struct clock_event_device *clk = this_cpu_ptr(arch_timer_evt);
 	u32 flags;
 
+	/*
+	 * if arch_timer is used to clocksource only,
+	 * it doesn't need to setup clockevent configuration.
+	 * this is only for exynos soc
+	 */
+	if (arch_timer_use_clocksource_only)
+		goto skip_clockevent_setup;
+
 	__arch_timer_setup(ARCH_TIMER_TYPE_CP15, clk);
 
 	flags = check_ppi_trigger(arch_timer_ppi[arch_timer_uses_ppi]);
@@ -907,6 +918,7 @@ static int arch_timer_starting_cpu(unsigned int cpu)
 				  flags);
 	}
 
+skip_clockevent_setup:
 	arch_counter_set_user_access();
 	if (evtstrm_enable)
 		arch_timer_configure_evtstream();
@@ -955,6 +967,7 @@ u32 arch_timer_get_rate(void)
 {
 	return arch_timer_rate;
 }
+EXPORT_SYMBOL_GPL(arch_timer_get_rate);
 
 bool arch_timer_evtstrm_available(void)
 {
@@ -966,14 +979,32 @@ bool arch_timer_evtstrm_available(void)
 	return cpumask_test_cpu(raw_smp_processor_id(), &evtstrm_available);
 }
 
+void arch_timer_mem_get_cval(u32 *lo, u32 *hi)
+{
+	u32 ctrl;
+
+	*lo = *hi = ~0U;
+
+	if (!arch_counter_base)
+		return;
+
+	ctrl = readl_relaxed(arch_counter_base + CNTV_CTL);
+
+	if (ctrl & ARCH_TIMER_CTRL_ENABLE) {
+		*lo = readl_relaxed(arch_counter_base + CNTCVAL_LO);
+		*hi = readl_relaxed(arch_counter_base + CNTCVAL_HI);
+	}
+}
+EXPORT_SYMBOL_GPL(arch_timer_mem_get_cval);
+
 static u64 arch_counter_get_cntvct_mem(void)
 {
 	u32 vct_lo, vct_hi, tmp_hi;
 
 	do {
-		vct_hi = readl_relaxed(arch_counter_base + CNTVCT_HI);
-		vct_lo = readl_relaxed(arch_counter_base + CNTVCT_LO);
-		tmp_hi = readl_relaxed(arch_counter_base + CNTVCT_HI);
+		vct_hi = readl_relaxed_no_log(arch_counter_base + CNTVCT_HI);
+		vct_lo = readl_relaxed_no_log(arch_counter_base + CNTVCT_LO);
+		tmp_hi = readl_relaxed_no_log(arch_counter_base + CNTVCT_HI);
 	} while (vct_hi != tmp_hi);
 
 	return ((u64) vct_hi << 32) | vct_lo;
@@ -1032,8 +1063,17 @@ static int arch_timer_dying_cpu(unsigned int cpu)
 	struct clock_event_device *clk = this_cpu_ptr(arch_timer_evt);
 
 	cpumask_clear_cpu(smp_processor_id(), &evtstrm_available);
+	/*
+	 * If arch_timer is used to clocksource only,
+	 * it doesn't need to setup clockevent configuration.
+	 * This is only for Exynos SoC
+	 */
+	if (arch_timer_use_clocksource_only)
+		goto skip_clockevent_setup;
 
 	arch_timer_stop(clk);
+
+skip_clockevent_setup:
 	return 0;
 }
 
@@ -1274,6 +1314,12 @@ static int __init arch_timer_of_init(struct device_node *np)
 	rate = arch_timer_get_cntfrq();
 	arch_timer_of_configure_rate(rate, np);
 
+	/* Exynos Specific Device Tree Information */
+	if (of_property_read_bool(np, "use-clocksource-only")) {
+		pr_info("%s: arch_timer is used only clocksource\n", __func__);
+		arch_timer_use_clocksource_only = true;
+	}
+
 	arch_timer_c3stop = !of_property_read_bool(np, "always-on");
 
 	/* Check for globally applicable workarounds */
@@ -1322,7 +1368,7 @@ arch_timer_mem_frame_get_cntfrq(struct arch_timer_mem_frame *frame)
 		return 0;
 	}
 
-	rate = readl_relaxed(base + CNTFRQ);
+	rate = readl_relaxed_no_log(base + CNTFRQ);
 
 	iounmap(base);
 
@@ -1344,7 +1390,7 @@ arch_timer_mem_find_best_frame(struct arch_timer_mem *timer_mem)
 		return NULL;
 	}
 
-	cnttidr = readl_relaxed(cntctlbase + CNTTIDR);
+	cnttidr = readl_relaxed_no_log(cntctlbase + CNTTIDR);
 
 	/*
 	 * Try to find a virtual capable frame. Otherwise fall back to a
@@ -1359,8 +1405,8 @@ arch_timer_mem_find_best_frame(struct arch_timer_mem *timer_mem)
 			continue;
 
 		/* Try enabling everything, and see what sticks */
-		writel_relaxed(cntacr, cntctlbase + CNTACR(i));
-		cntacr = readl_relaxed(cntctlbase + CNTACR(i));
+		writel_relaxed_no_log(cntacr, cntctlbase + CNTACR(i));
+		cntacr = readl_relaxed_no_log(cntctlbase + CNTACR(i));
 
 		if ((cnttidr & CNTTIDR_VIRT(i)) &&
 		    !(~cntacr & (CNTACR_RWVT | CNTACR_RVCT))) {

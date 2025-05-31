@@ -3,7 +3,6 @@ Dynamic debug
 
 
 Introduction
-============
 
 This document describes how to use the dynamic debug (dyndbg) feature.
 
@@ -36,7 +35,6 @@ Dynamic debug has even more useful features:
    statements, to help guide you
 
 Controlling dynamic debug Behaviour
-===================================
 
 The behaviour of ``pr_debug()``/``dev_dbg()`` are controlled via writing to a
 control file in the 'debugfs' filesystem. Thus, you must first mount
@@ -54,8 +52,10 @@ If you make a mistake with the syntax, the write will fail thus::
 				<debugfs>/dynamic_debug/control
   -bash: echo: write error: Invalid argument
 
+Note, for systems without 'debugfs' enabled, the control file can be
+found in ``/proc/dynamic_debug/control``.
+
 Viewing Dynamic Debug Behaviour
-===============================
 
 You can view the currently configured behaviour of all the debug
 statements via::
@@ -88,7 +88,6 @@ the debug statement callsites with any non-default flags::
   /usr/src/packages/BUILD/sgi-enhancednfs-1.4/default/net/sunrpc/svcsock.c:1603 [sunrpc]svc_send p "svc_process: st_sendto returned %d\012"
 
 Command Language Reference
-==========================
 
 At the lexical level, a command comprises a sequence of words separated
 by spaces or tabs.  So these are all equivalent::
@@ -233,7 +232,6 @@ To clear all flags at once, use ``=_`` or ``-flmpt``.
 
 
 Debug messages during Boot Process
-==================================
 
 To activate debug messages for core code and built-in modules during
 the boot process, even before userspace and debugfs exists, use
@@ -263,7 +261,6 @@ boot.
 
 
 Debug Messages at Module Initialization Time
-============================================
 
 When ``modprobe foo`` is called, modprobe scans ``/proc/cmdline`` for
 ``foo.params``, strips ``foo.``, and passes them to the kernel along with
@@ -306,7 +303,6 @@ the sysfs interface if the debug messages are no longer needed::
    echo "module module_name -p" > <debugfs>/dynamic_debug/control
 
 Examples
-========
 
 ::
 

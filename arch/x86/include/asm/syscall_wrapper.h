@@ -6,35 +6,20 @@
 #ifndef _ASM_X86_SYSCALL_WRAPPER_H
 #define _ASM_X86_SYSCALL_WRAPPER_H
 
+struct pt_regs;
+
 /* Mapping of registers to parameters for syscalls on x86-64 and x32 */
 #define SC_X86_64_REGS_TO_ARGS(x, ...)					\
 	__MAP(x,__SC_ARGS						\
 		,,regs->di,,regs->si,,regs->dx				\
 		,,regs->r10,,regs->r8,,regs->r9)			\
 
-
-/* SYSCALL_PT_ARGS is Adapted from s390x */
-#define SYSCALL_PT_ARG6(m, t1, t2, t3, t4, t5, t6)			\
-	SYSCALL_PT_ARG5(m, t1, t2, t3, t4, t5), m(t6, (regs->bp))
-#define SYSCALL_PT_ARG5(m, t1, t2, t3, t4, t5)				\
-	SYSCALL_PT_ARG4(m, t1, t2, t3, t4),  m(t5, (regs->di))
-#define SYSCALL_PT_ARG4(m, t1, t2, t3, t4)				\
-	SYSCALL_PT_ARG3(m, t1, t2, t3),  m(t4, (regs->si))
-#define SYSCALL_PT_ARG3(m, t1, t2, t3)					\
-	SYSCALL_PT_ARG2(m, t1, t2), m(t3, (regs->dx))
-#define SYSCALL_PT_ARG2(m, t1, t2)					\
-	SYSCALL_PT_ARG1(m, t1), m(t2, (regs->cx))
-#define SYSCALL_PT_ARG1(m, t1) m(t1, (regs->bx))
-#define SYSCALL_PT_ARGS(x, ...) SYSCALL_PT_ARG##x(__VA_ARGS__)
-
-#define __SC_COMPAT_CAST(t, a)						\
-	(__typeof(__builtin_choose_expr(__TYPE_IS_L(t), 0, 0U)))	\
-	(unsigned int)a
-
 /* Mapping of registers to parameters for syscalls on i386 */
 #define SC_IA32_REGS_TO_ARGS(x, ...)					\
-	SYSCALL_PT_ARGS(x, __SC_COMPAT_CAST,				\
-			__MAP(x, __SC_TYPE, __VA_ARGS__))		\
+	__MAP(x,__SC_ARGS						\
+	      ,,(unsigned int)regs->bx,,(unsigned int)regs->cx		\
+	      ,,(unsigned int)regs->dx,,(unsigned int)regs->si		\
+	      ,,(unsigned int)regs->di,,(unsigned int)regs->bp)
 
 #ifdef CONFIG_IA32_EMULATION
 /*
@@ -73,9 +58,15 @@
 	SYSCALL_ALIAS(__ia32_sys_##sname, __x64_sys_##sname);		\
 	asmlinkage long __x64_sys_##sname(const struct pt_regs *__unused)
 
-#define COND_SYSCALL(name)						\
-	cond_syscall(__x64_sys_##name);					\
-	cond_syscall(__ia32_sys_##name)
+#define COND_SYSCALL(name)							\
+	asmlinkage __weak long __x64_sys_##name(const struct pt_regs *__unused)	\
+	{									\
+		return sys_ni_syscall();					\
+	}									\
+	asmlinkage __weak long __ia32_sys_##name(const struct pt_regs *__unused)\
+	{									\
+		return sys_ni_syscall();					\
+	}
 
 #define SYS_NI(name)							\
 	SYSCALL_ALIAS(__x64_sys_##name, sys_ni_posix_timers);		\
@@ -129,7 +120,11 @@
  * kernel/time/posix-stubs.c to cover this case as well.
  */
 #define COND_SYSCALL_COMPAT(name) 					\
-	cond_syscall(__ia32_compat_sys_##name);				\
+	asmlinkage __weak long __ia32_compat_sys_##name(		\
+		const struct pt_regs *__unused)				\
+	{                                                               \
+		return sys_ni_syscall();                                \
+	}								\
 	cond_syscall(__x32_compat_sys_##name)
 
 #define COMPAT_SYS_NI(name)						\
@@ -199,15 +194,19 @@
  * macros to work correctly.
  */
 #ifndef SYSCALL_DEFINE0
-#define SYSCALL_DEFINE0(sname)						\
-	SYSCALL_METADATA(_##sname, 0);					\
+#define SYSCALL_DEFINE0(sname)					\
+	SYSCALL_METADATA(_##sname, 0);				\
 	asmlinkage long __x64_sys_##sname(const struct pt_regs *__unused);\
-	ALLOW_ERROR_INJECTION(__x64_sys_##sname, ERRNO);		\
+	ALLOW_ERROR_INJECTION(__x64_sys_##sname, ERRNO);	\
 	asmlinkage long __x64_sys_##sname(const struct pt_regs *__unused)
 #endif
 
 #ifndef COND_SYSCALL
-#define COND_SYSCALL(name) cond_syscall(__x64_sys_##name)
+#define COND_SYSCALL(name) 							\
+	asmlinkage __weak long __x64_sys_##name(const struct pt_regs *__unused)	\
+	{									\
+		return sys_ni_syscall();					\
+	}
 #endif
 
 #ifndef SYS_NI
@@ -219,7 +218,6 @@
  * For VSYSCALLS, we need to declare these three syscalls with the new
  * pt_regs-based calling convention for in-kernel use.
  */
-struct pt_regs;
 asmlinkage long __x64_sys_getcpu(const struct pt_regs *regs);
 asmlinkage long __x64_sys_gettimeofday(const struct pt_regs *regs);
 asmlinkage long __x64_sys_time(const struct pt_regs *regs);

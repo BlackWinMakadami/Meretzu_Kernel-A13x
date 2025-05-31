@@ -25,6 +25,10 @@
 #include <linux/usb/audio-v2.h>
 #include <linux/usb/audio-v3.h>
 
+#ifdef CONFIG_SND_EXYNOS_USB_AUDIO
+#include <linux/usb/exynos_usb_audio.h>
+#endif
+
 #include <sound/core.h>
 #include <sound/info.h>
 #include <sound/pcm.h>
@@ -291,17 +295,19 @@ static int __uac_clock_find_source(struct snd_usb_audio *chip,
 			return -EINVAL;
 		}
 
+		if ((size_t)&selector->baCSourceID[ret - 1] >=
+				(size_t)(chip->ctrl_intf->extra + chip->ctrl_intf->extralen)) {
+			usb_audio_err(chip,
+				"%s(): error. out of boundary, ret %d\n",
+				__func__, ret);
+			return -EINVAL;
+		}
+
 		cur = ret;
 		ret = __uac_clock_find_source(chip, fmt,
 					      selector->baCSourceID[ret - 1],
 					      visited, validate);
 		if (ret > 0) {
-			/*
-			 * For Samsung USBC Headset (AKG), setting clock selector again
-			 * will result in incorrect default clock setting problems
-			 */
-			if (chip->usb_id == USB_ID(0x04e8, 0xa051))
-				return ret;
 			err = uac_clock_selector_set_val(chip, entity_id, cur);
 			if (err < 0)
 				return err;
@@ -314,6 +320,14 @@ static int __uac_clock_find_source(struct snd_usb_audio *chip,
 		for (i = 1; i <= selector->bNrInPins; i++) {
 			if (i == cur)
 				continue;
+
+			if ((size_t)&selector->baCSourceID[i - 1] >=
+					(size_t)(chip->ctrl_intf->extra + chip->ctrl_intf->extralen)) {
+				usb_audio_err(chip,
+					"%s(): error. out of boundary, i %d\n",
+					__func__, i);
+				break;
+			}
 
 			ret = __uac_clock_find_source(chip, fmt,
 						      selector->baCSourceID[i - 1],
@@ -395,6 +409,14 @@ static int __uac3_clock_find_source(struct snd_usb_audio *chip,
 			return -EINVAL;
 		}
 
+		if ((size_t)&selector->baCSourceID[ret - 1] >=
+				(size_t)(chip->ctrl_intf->extra + chip->ctrl_intf->extralen)) {
+			usb_audio_err(chip,
+				"%s(): error. out of boundary, ret %d\n",
+				__func__, ret);
+			return -EINVAL;
+		}
+
 		cur = ret;
 		ret = __uac3_clock_find_source(chip, fmt,
 					       selector->baCSourceID[ret - 1],
@@ -414,6 +436,14 @@ static int __uac3_clock_find_source(struct snd_usb_audio *chip,
 
 			if (i == cur)
 				continue;
+
+			if ((size_t)&selector->baCSourceID[i - 1] >=
+					(size_t)(chip->ctrl_intf->extra + chip->ctrl_intf->extralen)) {
+				usb_audio_err(chip,
+					"%s(): error. out of boundary, i %d\n",
+					__func__, i);
+				break;
+			}
 
 			ret = __uac3_clock_find_source(chip, fmt,
 						       selector->baCSourceID[i - 1],
@@ -569,6 +599,30 @@ static int set_sample_rate_v2v3(struct snd_usb_audio *chip, int iface,
 	int clock;
 	bool writeable;
 	u32 bmControls;
+	unsigned char ep;
+	unsigned char numEndpoints;
+	int direction;
+	int i;
+
+	numEndpoints = get_iface_desc(alts)->bNumEndpoints;
+	if (numEndpoints < 1)
+		return -EINVAL;
+	if (numEndpoints == 1) {
+		ep = get_endpoint(alts, 0)->bEndpointAddress;
+	} else {
+		for (i = 0; i < numEndpoints; i++) {
+			ep = get_endpoint(alts, i)->bmAttributes;
+			if (!(ep & 0x30)) {
+				ep = get_endpoint(alts, i)->bEndpointAddress;
+				break;
+			}
+		}
+	}
+	if (ep & 0x80)
+		direction = 1;
+	else
+		direction = 0;
+
 
 	/* First, try to find a valid clock. This may trigger
 	 * automatic clock selection if the current clock is not
@@ -641,8 +695,15 @@ static int set_sample_rate_v2v3(struct snd_usb_audio *chip, int iface,
 	 * interface is active. */
 	if (rate != prev_rate) {
 		usb_set_interface(dev, iface, 0);
+#ifdef CONFIG_SND_EXYNOS_USB_AUDIO
+		exynos_usb_audio_setintf(dev, fmt->iface, 0, direction);
+#endif
 		snd_usb_set_interface_quirk(dev);
 		usb_set_interface(dev, iface, fmt->altsetting);
+#ifdef CONFIG_SND_EXYNOS_USB_AUDIO
+		exynos_usb_audio_setintf(dev, fmt->iface,
+					fmt->altsetting, direction);
+#endif
 		snd_usb_set_interface_quirk(dev);
 	}
 

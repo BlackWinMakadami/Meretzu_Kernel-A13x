@@ -29,6 +29,7 @@
 #include <linux/dma-iommu.h>
 #include <linux/err.h>
 #include <linux/interrupt.h>
+#include <linux/io-pgtable.h>
 #include <linux/iommu.h>
 #include <linux/iopoll.h>
 #include <linux/module.h>
@@ -41,8 +42,6 @@
 #include <linux/platform_device.h>
 
 #include <linux/amba/bus.h>
-
-#include "io-pgtable.h"
 
 /* MMIO registers */
 #define ARM_SMMU_IDR0			0x0
@@ -1250,7 +1249,6 @@ static irqreturn_t arm_smmu_evtq_thread(int irq, void *dev)
 				dev_info(smmu->dev, "\t0x%016llx\n",
 					 (unsigned long long)evt[i]);
 
-			cond_resched();
 		}
 
 		/*

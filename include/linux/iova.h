@@ -74,6 +74,7 @@ struct iova_domain {
 	struct rb_node	*cached32_node; /* Save last 32-bit alloced node */
 	unsigned long	granule;	/* pfn granularity for this domain */
 	unsigned long	start_pfn;	/* Lower limit for this domain */
+	unsigned long	end_pfn;        /* Upper limit for this domain */
 	unsigned long	dma_32bit_pfn;
 	struct iova	anchor;		/* rbtree lookup anchor */
 	struct iova_rcache rcaches[IOVA_RANGE_CACHE_MAX_SIZE];	/* IOVA range caches */
@@ -96,6 +97,7 @@ struct iova_domain {
 						   flush-queues */
 	atomic_t fq_timer_on;			/* 1 when timer is active, 0
 						   when not */
+	bool best_fit;
 };
 
 static inline unsigned long iova_size(struct iova *iova)
@@ -133,7 +135,7 @@ static inline unsigned long iova_pfn(struct iova_domain *iovad, dma_addr_t iova)
 	return iova >> iova_shift(iovad);
 }
 
-#if IS_REACHABLE(CONFIG_IOMMU_IOVA)
+#if IS_ENABLED(CONFIG_IOMMU_IOVA)
 int iova_cache_get(void);
 void iova_cache_put(void);
 

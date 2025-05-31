@@ -1,5 +1,4 @@
 Devres - Managed Device Resource
-================================
 
 Tejun Heo	<teheo@suse.de>
 

@@ -14,13 +14,11 @@
 #include <linux/types.h>
 #include <linux/init.h>
 #include <linux/slab.h>
-#include <linux/delay.h>
 #include <linux/device.h>
 #include <linux/notifier.h>
 #include <linux/err.h>
 #include <linux/of.h>
 #include <linux/power_supply.h>
-#include <linux/property.h>
 #include <linux/thermal.h>
 #include "power_supply.h"
 
@@ -141,13 +139,8 @@ static void power_supply_deferred_register_work(struct work_struct *work)
 	struct power_supply *psy = container_of(work, struct power_supply,
 						deferred_register_work.work);
 
-	if (psy->dev.parent) {
-		while (!mutex_trylock(&psy->dev.parent->mutex)) {
-			if (psy->removing)
-				return;
-			msleep(10);
-		}
-	}
+	if (psy->dev.parent)
+		mutex_lock(&psy->dev.parent->mutex);
 
 	power_supply_changed(psy);
 
@@ -269,8 +262,8 @@ static int power_supply_check_supplies(struct power_supply *psy)
 	if (!psy->supplied_from)
 		return -ENOMEM;
 
-	*psy->supplied_from = devm_kcalloc(&psy->dev,
-					   cnt - 1, sizeof(char *),
+	*psy->supplied_from = devm_kzalloc(&psy->dev,
+					   sizeof(char *) * (cnt - 1),
 					   GFP_KERNEL);
 	if (!*psy->supplied_from)
 		return -ENOMEM;
@@ -350,10 +343,6 @@ static int __power_supply_is_system_supplied(struct device *dev, void *data)
 	struct power_supply *psy = dev_get_drvdata(dev);
 	unsigned int *count = data;
 
-	if (!psy->desc->get_property(psy, POWER_SUPPLY_PROP_SCOPE, &ret))
-		if (ret.intval == POWER_SUPPLY_SCOPE_DEVICE)
-			return 0;
-
 	(*count)++;
 	if (psy->desc->type != POWER_SUPPLY_TYPE_BATTERY)
 		if (!psy->desc->get_property(psy, POWER_SUPPLY_PROP_ONLINE,
@@ -372,8 +361,8 @@ int power_supply_is_system_supplied(void)
 				      __power_supply_is_system_supplied);
 
 	/*
-	 * If no system scope power class device was found at all, most probably we
-	 * are running on a desktop system, so assume we are on mains power.
+	 * If no power class device was found at all, most probably we are
+	 * running on a desktop system, so assume we are on mains power.
 	 */
 	if (count == 0)
 		return 1;
@@ -382,49 +371,46 @@ int power_supply_is_system_supplied(void)
 }
 EXPORT_SYMBOL_GPL(power_supply_is_system_supplied);
 
-struct psy_get_supplier_prop_data {
-	struct power_supply *psy;
-	enum power_supply_property psp;
-	union power_supply_propval *val;
-};
-
-static int __power_supply_get_supplier_property(struct device *dev, void *_data)
+static int __power_supply_get_supplier_max_current(struct device *dev,
+						   void *data)
 {
+	union power_supply_propval ret = {0,};
 	struct power_supply *epsy = dev_get_drvdata(dev);
-	struct psy_get_supplier_prop_data *data = _data;
+	struct power_supply *psy = data;
 
-	if (__power_supply_is_supplied_by(epsy, data->psy))
-		if (!epsy->desc->get_property(epsy, data->psp, data->val))
-			return 1; /* Success */
-
-	return 0; /* Continue iterating */
-}
-
-int power_supply_get_property_from_supplier(struct power_supply *psy,
-					    enum power_supply_property psp,
-					    union power_supply_propval *val)
-{
-	struct psy_get_supplier_prop_data data = {
-		.psy = psy,
-		.psp = psp,
-		.val = val,
-	};
-	int ret;
-
-	/*
-	 * This function is not intended for use with a supply with multiple
-	 * suppliers, we simply pick the first supply to report the psp.
-	 */
-	ret = class_for_each_device(power_supply_class, NULL, &data,
-				    __power_supply_get_supplier_property);
-	if (ret < 0)
-		return ret;
-	if (ret == 0)
-		return -ENODEV;
+	if (__power_supply_is_supplied_by(epsy, psy))
+		if (!epsy->desc->get_property(epsy,
+					      POWER_SUPPLY_PROP_CURRENT_MAX,
+					      &ret))
+			return ret.intval;
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(power_supply_get_property_from_supplier);
+
+int power_supply_set_input_current_limit_from_supplier(struct power_supply *psy)
+{
+	union power_supply_propval val = {0,};
+	int curr;
+
+	if (!psy->desc->set_property)
+		return -EINVAL;
+
+	/*
+	 * This function is not intended for use with a supply with multiple
+	 * suppliers, we simply pick the first supply to report a non 0
+	 * max-current.
+	 */
+	curr = class_for_each_device(power_supply_class, NULL, psy,
+				      __power_supply_get_supplier_max_current);
+	if (curr <= 0)
+		return (curr == 0) ? -ENODEV : curr;
+
+	val.intval = curr;
+
+	return psy->desc->set_property(psy,
+				POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT, &val);
+}
+EXPORT_SYMBOL_GPL(power_supply_set_input_current_limit_from_supplier);
 
 int power_supply_set_battery_charged(struct power_supply *psy)
 {
@@ -482,6 +468,8 @@ EXPORT_SYMBOL_GPL(power_supply_get_by_name);
  */
 void power_supply_put(struct power_supply *psy)
 {
+	might_sleep();
+
 	atomic_dec(&psy->use_cnt);
 	put_device(&psy->dev);
 }
@@ -680,8 +668,8 @@ EXPORT_SYMBOL_GPL(power_supply_powers);
 
 static void power_supply_dev_release(struct device *dev)
 {
-	struct power_supply *psy = to_power_supply(dev);
-	dev_dbg(dev, "%s\n", __func__);
+	struct power_supply *psy = container_of(dev, struct power_supply, dev);
+	pr_debug("device: '%s': %s\n", dev_name(dev), __func__);
 	kfree(psy);
 }
 
@@ -855,20 +843,11 @@ __power_supply_register(struct device *parent,
 {
 	struct device *dev;
 	struct power_supply *psy;
-	int i, rc;
+	int rc;
 
 	if (!parent)
 		pr_warn("%s: Expected proper parent device for '%s'\n",
 			__func__, desc->name);
-
-	if (!desc || !desc->name || !desc->properties || !desc->num_properties)
-		return ERR_PTR(-EINVAL);
-
-	for (i = 0; i < desc->num_properties; ++i) {
-		if ((desc->properties[i] == POWER_SUPPLY_PROP_USB_TYPE) &&
-		    (!desc->usb_types || !desc->num_usb_types))
-			return ERR_PTR(-EINVAL);
-	}
 
 	psy = kzalloc(sizeof(*psy), GFP_KERNEL);
 	if (!psy)
@@ -886,8 +865,7 @@ __power_supply_register(struct device *parent,
 	psy->desc = desc;
 	if (cfg) {
 		psy->drv_data = cfg->drv_data;
-		psy->of_node =
-			cfg->fwnode ? to_of_node(cfg->fwnode) : cfg->of_node;
+		psy->of_node = cfg->of_node;
 		psy->supplied_to = cfg->supplied_to;
 		psy->num_supplicants = cfg->num_supplicants;
 	}
@@ -950,8 +928,8 @@ create_triggers_failed:
 register_cooler_failed:
 	psy_unregister_thermal(psy);
 register_thermal_failed:
-wakeup_init_failed:
 	device_del(dev);
+wakeup_init_failed:
 device_add_failed:
 check_supplies_failed:
 dev_set_name_failed:
@@ -1093,7 +1071,6 @@ EXPORT_SYMBOL_GPL(devm_power_supply_register_no_ws);
 void power_supply_unregister(struct power_supply *psy)
 {
 	WARN_ON(atomic_dec_return(&psy->use_cnt));
-	psy->removing = true;
 	cancel_work_sync(&psy->changed_work);
 	cancel_delayed_work_sync(&psy->deferred_register_work);
 	sysfs_remove_link(&psy->dev.kobj, "powers");

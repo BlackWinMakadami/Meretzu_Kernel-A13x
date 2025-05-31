@@ -194,7 +194,9 @@ static int soc_compr_open_fe(struct snd_compr_stream *cstream)
 	fe->dpcm[stream].state = SND_SOC_DPCM_STATE_OPEN;
 	fe->dpcm[stream].runtime_update = SND_SOC_DPCM_UPDATE_NO;
 
+	mutex_lock_nested(&fe->pcm_mutex, fe->pcm_subclass);
 	snd_soc_runtime_activate(fe, stream);
+	mutex_unlock(&fe->pcm_mutex);
 
 	mutex_unlock(&fe->card->mutex);
 
@@ -310,7 +312,9 @@ static int soc_compr_free_fe(struct snd_compr_stream *cstream)
 	else
 		stream = SNDRV_PCM_STREAM_CAPTURE;
 
+	mutex_lock_nested(&fe->pcm_mutex, fe->pcm_subclass);
 	snd_soc_runtime_deactivate(fe, stream);
+	mutex_unlock(&fe->pcm_mutex);
 
 	fe->dpcm[stream].runtime_update = SND_SOC_DPCM_UPDATE_FE;
 
@@ -394,6 +398,7 @@ static int soc_compr_trigger_fe(struct snd_compr_stream *cstream, int cmd)
 	struct snd_soc_component *component;
 	struct snd_soc_rtdcom_list *rtdcom;
 	struct snd_soc_dai *cpu_dai = fe->cpu_dai;
+	enum snd_soc_dpcm_trigger trigger;
 	int ret = 0, __ret, stream;
 
 	if (cmd == SND_COMPR_TRIGGER_PARTIAL_DRAIN ||
@@ -418,7 +423,44 @@ static int soc_compr_trigger_fe(struct snd_compr_stream *cstream, int cmd)
 	else
 		stream = SNDRV_PCM_STREAM_CAPTURE;
 
+	trigger = fe->dai_link->trigger[stream];
+	switch (cmd) {
+	case SNDRV_PCM_TRIGGER_START:
+	case SNDRV_PCM_TRIGGER_RESUME:
+	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
+		switch (trigger) {
+		case SND_SOC_DPCM_TRIGGER_PRE_POST:
+			trigger = SND_SOC_DPCM_TRIGGER_PRE;
+			break;
+		case SND_SOC_DPCM_TRIGGER_POST_PRE:
+			trigger = SND_SOC_DPCM_TRIGGER_POST;
+			break;
+		default:
+			break;
+		}
+		break;
+	case SNDRV_PCM_TRIGGER_STOP:
+	case SNDRV_PCM_TRIGGER_SUSPEND:
+	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
+		switch (trigger) {
+		case SND_SOC_DPCM_TRIGGER_PRE_POST:
+			trigger = SND_SOC_DPCM_TRIGGER_POST;
+			break;
+		case SND_SOC_DPCM_TRIGGER_POST_PRE:
+			trigger = SND_SOC_DPCM_TRIGGER_PRE;
+			break;
+		default:
+			break;
+		}
+		break;
+	}
+
 	mutex_lock_nested(&fe->card->mutex, SND_SOC_CARD_CLASS_RUNTIME);
+
+	if (trigger == SND_SOC_DPCM_TRIGGER_POST) {
+		fe->dpcm[stream].runtime_update = SND_SOC_DPCM_UPDATE_FE;
+		ret = dpcm_be_dai_trigger(fe, stream, cmd);
+	}
 
 	if (cpu_dai->driver->cops && cpu_dai->driver->cops->trigger) {
 		ret = cpu_dai->driver->cops->trigger(cstream, cmd, cpu_dai);
@@ -440,9 +482,10 @@ static int soc_compr_trigger_fe(struct snd_compr_stream *cstream, int cmd)
 	if (ret < 0)
 		goto out;
 
-	fe->dpcm[stream].runtime_update = SND_SOC_DPCM_UPDATE_FE;
-
-	ret = dpcm_be_dai_trigger(fe, stream, cmd);
+	if (trigger == SND_SOC_DPCM_TRIGGER_PRE) {
+		fe->dpcm[stream].runtime_update = SND_SOC_DPCM_UPDATE_FE;
+		ret = dpcm_be_dai_trigger(fe, stream, cmd);
+	}
 
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_START:
@@ -554,6 +597,14 @@ static int soc_compr_set_params_fe(struct snd_compr_stream *cstream,
 	 */
 	memset(&fe->dpcm[fe_substream->stream].hw_params, 0,
 		sizeof(struct snd_pcm_hw_params));
+
+	component = fe->cpu_dai->component;
+	if (component->driver->compr_ops && component->driver->compr_ops->get_hw_params) {
+		ret = component->driver->compr_ops->get_hw_params(cstream,
+				&fe->dpcm[fe_substream->stream].hw_params);
+		if (ret < 0)
+			goto out;
+	}
 
 	fe->dpcm[stream].runtime_update = SND_SOC_DPCM_UPDATE_FE;
 
@@ -774,6 +825,28 @@ static int soc_compr_copy(struct snd_compr_stream *cstream,
 	return ret;
 }
 
+static int sst_compr_set_next_track_param(struct snd_compr_stream *cstream,
+				union snd_codec_options *codec_options)
+{
+	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
+	struct snd_soc_component *component;
+	struct snd_soc_rtdcom_list *rtdcom;
+	int ret = 0;
+
+	for_each_rtdcom(rtd, rtdcom) {
+		component = rtdcom->component;
+
+		if (component->driver->compr_ops &&
+			component->driver->compr_ops->set_next_track_param)
+			ret =
+			component->driver->compr_ops->set_next_track_param(
+				cstream, codec_options);
+	}
+
+	return ret;
+}
+
+
 static int soc_compr_set_metadata(struct snd_compr_stream *cstream,
 				  struct snd_compr_metadata *metadata)
 {
@@ -840,6 +913,7 @@ static struct snd_compr_ops soc_compr_ops = {
 	.free		= soc_compr_free,
 	.set_params	= soc_compr_set_params,
 	.set_metadata   = soc_compr_set_metadata,
+	.set_next_track_param	= sst_compr_set_next_track_param,
 	.get_metadata	= soc_compr_get_metadata,
 	.get_params	= soc_compr_get_params,
 	.trigger	= soc_compr_trigger,
@@ -856,6 +930,7 @@ static struct snd_compr_ops soc_compr_dyn_ops = {
 	.set_params	= soc_compr_set_params_fe,
 	.get_params	= soc_compr_get_params,
 	.set_metadata   = soc_compr_set_metadata,
+	.set_next_track_param	= sst_compr_set_next_track_param,
 	.get_metadata	= soc_compr_get_metadata,
 	.trigger	= soc_compr_trigger_fe,
 	.pointer	= soc_compr_pointer,
@@ -944,7 +1019,7 @@ int snd_soc_new_compress(struct snd_soc_pcm_runtime *rtd, int num)
 		rtd->fe_compr = 1;
 		if (rtd->dai_link->dpcm_playback)
 			be_pcm->streams[SNDRV_PCM_STREAM_PLAYBACK].substream->private_data = rtd;
-		if (rtd->dai_link->dpcm_capture)
+		else if (rtd->dai_link->dpcm_capture)
 			be_pcm->streams[SNDRV_PCM_STREAM_CAPTURE].substream->private_data = rtd;
 		memcpy(compr->ops, &soc_compr_dyn_ops, sizeof(soc_compr_dyn_ops));
 	} else {
@@ -982,8 +1057,21 @@ int snd_soc_new_compress(struct snd_soc_pcm_runtime *rtd, int num)
 	rtd->compr = compr;
 	compr->private_data = rtd;
 
+	for_each_rtdcom(rtd, rtdcom) {
+		component = rtdcom->component;
+
+		if (component->driver->pcm_new) {
+			ret = component->driver->pcm_new(rtd);
+			if (ret < 0) {
+				pr_err("asoc: compress pcm constructor failed\n");
+				goto compr_err;
+			}
+		}
+	}
+
 	dev_info(rtd->card->dev, "Compress ASoC: %s <-> %s mapping ok\n",
 		 codec_dai->name, cpu_dai->name);
+
 	return ret;
 
 compr_err:

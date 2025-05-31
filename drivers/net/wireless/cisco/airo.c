@@ -17,7 +17,6 @@
     Support for MPI350 cards was added by Fabrice Bellet
     <fabrice@bellet.info>.
 
-======================================================================*/
 
 #include <linux/err.h>
 #include <linux/init.h>
@@ -6105,6 +6104,8 @@ static int airo_get_rate(struct net_device *dev,
 	ret = readStatusRid(local, &status_rid, 1);
 	if (ret)
 		return -EBUSY;
+
+	readStatusRid(local, &status_rid, 1);
 
 	vwrq->value = le16_to_cpu(status_rid.currentXmitRate) * 500000;
 	/* If more than one rate, set auto */

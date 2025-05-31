@@ -21,6 +21,10 @@
 #include <linux/sched.h>
 #include <linux/sched/user.h>
 
+#ifdef CONFIG_KDP
+#include <linux/kdp.h>
+#endif
+
 struct cred;
 struct inode;
 
@@ -114,7 +118,7 @@ static inline int groups_search(const struct group_info *group_info, kgid_t grp)
  * same context as task->real_cred.
  */
 struct cred {
-	atomic_long_t	usage;
+	atomic_t	usage;
 #ifdef CONFIG_DEBUG_CREDENTIALS
 	atomic_t	subscribers;	/* number of processes subscribed */
 	void		*put_addr;
@@ -155,6 +159,12 @@ struct cred {
 		int non_rcu;			/* Can we skip RCU deletion? */
 		struct rcu_head	rcu;		/* RCU deletion hook */
 	};
+#ifdef CONFIG_KDP
+	atomic_t *use_cnt;
+	struct task_struct *bp_task;
+	void *bp_pgd;
+	unsigned long long type;
+#endif
 } __randomize_layout;
 
 extern void __put_cred(struct cred *);
@@ -229,18 +239,20 @@ static inline bool cap_ambient_invariant_ok(const struct cred *cred)
  * Get a reference on the specified set of new credentials.  The caller must
  * release the reference.
  */
+#ifndef CONFIG_KDP_CRED
 static inline struct cred *get_new_cred(struct cred *cred)
 {
-	atomic_long_inc(&cred->usage);
+	atomic_inc(&cred->usage);
 	return cred;
 }
+#endif
 
 /**
  * get_cred - Get a reference on a set of credentials
  * @cred: The credentials to reference
  *
  * Get a reference on the specified set of credentials.  The caller must
- * release the reference.  If %NULL is passed, it is returned with no action.
+ * release the reference.
  *
  * This is used to deal with a committed set of credentials.  Although the
  * pointer is const, this will temporarily discard the const and increment the
@@ -251,9 +263,12 @@ static inline struct cred *get_new_cred(struct cred *cred)
 static inline const struct cred *get_cred(const struct cred *cred)
 {
 	struct cred *nonconst_cred = (struct cred *) cred;
-	if (!cred)
-		return cred;
 	validate_creds(cred);
+#ifdef CONFIG_KDP_CRED
+	if (is_kdp_protect_addr((unsigned long)nonconst_cred))
+		GET_ROCRED_RCU(nonconst_cred)->non_rcu = 0;
+	else
+#endif
 	nonconst_cred->non_rcu = 0;
 	return get_new_cred(nonconst_cred);
 }
@@ -263,22 +278,22 @@ static inline const struct cred *get_cred(const struct cred *cred)
  * @cred: The credentials to release
  *
  * Release a reference to a set of credentials, deleting them when the last ref
- * is released.  If %NULL is passed, nothing is done.
+ * is released.
  *
  * This takes a const pointer to a set of credentials because the credentials
  * on task_struct are attached by const pointers to prevent accidental
  * alteration of otherwise immutable credential sets.
  */
+#ifndef CONFIG_KDP_CRED
 static inline void put_cred(const struct cred *_cred)
 {
 	struct cred *cred = (struct cred *) _cred;
 
-	if (cred) {
-		validate_creds(cred);
-		if (atomic_long_dec_and_test(&(cred)->usage))
-			__put_cred(cred);
-	}
+	validate_creds(cred);
+	if (atomic_dec_and_test(&(cred)->usage))
+		__put_cred(cred);
 }
+#endif
 
 /**
  * current_cred - Access the current task's subjective credentials

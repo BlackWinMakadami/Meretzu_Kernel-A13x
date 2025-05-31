@@ -70,7 +70,6 @@ struct socket_data {
 
     Linux resource management extensions
 
-======================================================================*/
 
 static struct resource *
 claim_region(struct pcmcia_socket *s, resource_size_t base,
@@ -106,7 +105,6 @@ static void free_region(struct resource *res)
 
     These manage the internal databases of available resources.
 
-======================================================================*/
 
 static int add_interval(struct resource_map *map, u_long base, u_long num)
 {
@@ -179,7 +177,6 @@ static int sub_interval(struct resource_map *map, u_long base, u_long num)
     These routines examine a region of IO or memory addresses to
     determine what ranges might be genuinely available.
 
-======================================================================*/
 
 #ifdef CONFIG_PCMCIA_PROBE
 static void do_io_probe(struct pcmcia_socket *s, unsigned int base,
@@ -680,7 +677,6 @@ static int __nonstatic_adjust_io_region(struct pcmcia_socket *s,
     of 0 means that all bits of *base are significant.  *base should
     also be strictly less than 'align'.
 
-======================================================================*/
 
 static struct resource *__nonstatic_find_io_region(struct pcmcia_socket *s,
 						unsigned long base, int num,
@@ -814,9 +810,6 @@ static struct resource *nonstatic_find_mem_region(u_long base, u_long num,
 	struct pcmcia_align_data data;
 	unsigned long min, max;
 	int ret, i, j;
-
-	if (!res)
-		return NULL;
 
 	low = low || !(s->features & SS_CAP_PAGE_REGS);
 
@@ -1056,8 +1049,6 @@ static void nonstatic_release_resource_db(struct pcmcia_socket *s)
 		q = p->next;
 		kfree(p);
 	}
-
-	kfree(data);
 }
 
 

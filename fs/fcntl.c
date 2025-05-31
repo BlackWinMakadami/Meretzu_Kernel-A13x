@@ -25,6 +25,8 @@
 #include <linux/user_namespace.h>
 #include <linux/memfd.h>
 #include <linux/compat.h>
+#include <linux/task_integrity.h>
+#include <linux/proca.h>
 
 #include <linux/poll.h>
 #include <asm/siginfo.h>
@@ -84,8 +86,8 @@ static int setfl(int fd, struct file * filp, unsigned long arg)
 	return error;
 }
 
-void __f_setown(struct file *filp, struct pid *pid, enum pid_type type,
-		int force)
+static void f_modown(struct file *filp, struct pid *pid, enum pid_type type,
+                     int force)
 {
 	write_lock_irq(&filp->f_owner.lock);
 	if (force || !filp->f_owner.pid) {
@@ -95,12 +97,18 @@ void __f_setown(struct file *filp, struct pid *pid, enum pid_type type,
 
 		if (pid) {
 			const struct cred *cred = current_cred();
-			security_file_set_fowner(filp);
 			filp->f_owner.uid = cred->uid;
 			filp->f_owner.euid = cred->euid;
 		}
 	}
 	write_unlock_irq(&filp->f_owner.lock);
+}
+
+void __f_setown(struct file *filp, struct pid *pid, enum pid_type type,
+		int force)
+{
+	security_file_set_fowner(filp);
+	f_modown(filp, pid, type, force);
 }
 EXPORT_SYMBOL(__f_setown);
 
@@ -137,7 +145,7 @@ EXPORT_SYMBOL(f_setown);
 
 void f_delown(struct file *filp)
 {
-	__f_setown(filp, NULL, PIDTYPE_TGID, 1);
+	f_modown(filp, NULL, PIDTYPE_TGID, 1);
 }
 
 pid_t f_getown(struct file *filp)
@@ -410,6 +418,34 @@ static long do_fcntl(int fd, unsigned int cmd, unsigned long arg,
 	case F_GETPIPE_SZ:
 		err = pipe_fcntl(filp, cmd, arg);
 		break;
+#ifdef CONFIG_FIVE
+	case F_FIVE_SIGN:
+		err = five_fcntl_sign(filp,
+				(struct integrity_label __user *)arg);
+		break;
+	case F_FIVE_VERIFY_ASYNC:
+		err = five_fcntl_verify_async(filp);
+		break;
+	case F_FIVE_VERIFY_SYNC:
+		err = five_fcntl_verify_sync(filp);
+		break;
+#if defined(CONFIG_FIVE_PA_FEATURE) || defined(CONFIG_PROCA)
+	case F_FIVE_PA_SETXATTR:
+		err = proca_fcntl_setxattr(filp, (void __user *)arg);
+		break;
+#endif
+	case F_FIVE_EDIT:
+		err = five_fcntl_edit(filp);
+		break;
+	case F_FIVE_CLOSE:
+		err = five_fcntl_close(filp);
+		break;
+#ifdef CONFIG_FIVE_DEBUG
+	case F_FIVE_DEBUG:
+		err = five_fcntl_debug(filp, (void __user *)arg);
+		break;
+#endif
+#endif
 	case F_ADD_SEALS:
 	case F_GET_SEALS:
 		err = memfd_fcntl(filp, cmd, arg);
@@ -987,14 +1023,13 @@ static void kill_fasync_rcu(struct fasync_struct *fa, int sig, int band)
 {
 	while (fa) {
 		struct fown_struct *fown;
-		unsigned long flags;
 
 		if (fa->magic != FASYNC_MAGIC) {
 			printk(KERN_ERR "kill_fasync: bad magic number in "
 			       "fasync_struct!\n");
 			return;
 		}
-		read_lock_irqsave(&fa->fa_lock, flags);
+		read_lock(&fa->fa_lock);
 		if (fa->fa_file) {
 			fown = &fa->fa_file->f_owner;
 			/* Don't send SIGURG to processes which have not set a
@@ -1003,7 +1038,7 @@ static void kill_fasync_rcu(struct fasync_struct *fa, int sig, int band)
 			if (!(sig == SIGURG && fown->signum == 0))
 				send_sigio(fown, fa->fa_fd, band);
 		}
-		read_unlock_irqrestore(&fa->fa_lock, flags);
+		read_unlock(&fa->fa_lock);
 		fa = rcu_dereference(fa->fa_next);
 	}
 }

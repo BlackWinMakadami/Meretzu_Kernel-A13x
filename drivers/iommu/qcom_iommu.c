@@ -26,6 +26,7 @@
 #include <linux/interrupt.h>
 #include <linux/io.h>
 #include <linux/io-64-nonatomic-hi-lo.h>
+#include <linux/io-pgtable.h>
 #include <linux/iommu.h>
 #include <linux/iopoll.h>
 #include <linux/kconfig.h>
@@ -42,7 +43,6 @@
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 
-#include "io-pgtable.h"
 #include "arm-smmu-regs.h"
 
 #define SMMU_INTR_SEL_NS     0x2000
@@ -767,12 +767,9 @@ static bool qcom_iommu_has_secure_context(struct qcom_iommu_dev *qcom_iommu)
 {
 	struct device_node *child;
 
-	for_each_child_of_node(qcom_iommu->dev->of_node, child) {
-		if (of_device_is_compatible(child, "qcom,msm-iommu-v1-sec")) {
-			of_node_put(child);
+	for_each_child_of_node(qcom_iommu->dev->of_node, child)
+		if (of_device_is_compatible(child, "qcom,msm-iommu-v1-sec"))
 			return true;
-		}
-	}
 
 	return false;
 }

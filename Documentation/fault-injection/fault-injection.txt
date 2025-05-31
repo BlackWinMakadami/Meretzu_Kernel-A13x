@@ -1,5 +1,4 @@
 Fault injection capabilities infrastructure
-===========================================
 
 See also drivers/md/md-faulty.c and "every_nth" module option for scsi_debug.
 
@@ -73,6 +72,8 @@ configuration of fault-injection capabilities.
 
 	specifies how many times failures may happen at most. A value of -1
 	means "no limit".
+	specifies how many times failures may happen at most.
+	A value of -1 means "no limit".
 
 - /sys/kernel/debug/fail*/space:
 

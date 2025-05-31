@@ -1,5 +1,4 @@
 Serial Peripheral Interface (SPI)
-=================================
 
 SPI is the "Serial Peripheral Interface", widely used with embedded
 systems because it is a simple and efficient interface: basically a
@@ -27,6 +26,8 @@ SPI shift register (maximizing throughput). Such drivers bridge between
 whatever bus they sit on (often the platform bus) and SPI, and expose
 the SPI side of their device as a :c:type:`struct spi_controller
 <spi_controller>`. SPI devices are children of that master,
+the SPI side of their device as a :c:type:`struct spi_master
+<spi_master>`. SPI devices are children of that master,
 represented as a :c:type:`struct spi_device <spi_device>` and
 manufactured from :c:type:`struct spi_board_info
 <spi_board_info>` descriptors which are usually provided by

@@ -34,6 +34,10 @@
 
 #include "internal.h"
 
+#ifdef CONFIG_SECURITY_DEFEX
+#include <linux/defex.h>
+#endif
+
 int do_truncate(struct dentry *dentry, loff_t length, unsigned int time_attrs,
 	struct file *filp)
 {
@@ -199,13 +203,13 @@ out:
 	return error;
 }
 
-SYSCALL_DEFINE2(ftruncate, unsigned int, fd, off_t, length)
+SYSCALL_DEFINE2(ftruncate, unsigned int, fd, unsigned long, length)
 {
 	return do_sys_ftruncate(fd, length, 1);
 }
 
 #ifdef CONFIG_COMPAT
-COMPAT_SYSCALL_DEFINE2(ftruncate, unsigned int, fd, compat_off_t, length)
+COMPAT_SYSCALL_DEFINE2(ftruncate, unsigned int, fd, compat_ulong_t, length)
 {
 	return do_sys_ftruncate(fd, length, 1);
 }
@@ -569,19 +573,14 @@ out_unlock:
 	return error;
 }
 
-int vfs_fchmod(struct file *file, umode_t mode)
-{
-	audit_file(file);
-	return chmod_common(&file->f_path, mode);
-}
-
 int ksys_fchmod(unsigned int fd, umode_t mode)
 {
 	struct fd f = fdget(fd);
 	int err = -EBADF;
 
 	if (f.file) {
-		err = vfs_fchmod(f.file, mode);
+		audit_file(f.file);
+		err = chmod_common(&f.file->f_path, mode);
 		fdput(f);
 	}
 	return err;
@@ -712,28 +711,23 @@ SYSCALL_DEFINE3(lchown, const char __user *, filename, uid_t, user, gid_t, group
 			   AT_SYMLINK_NOFOLLOW);
 }
 
-int vfs_fchown(struct file *file, uid_t user, gid_t group)
-{
-	int error;
-
-	error = mnt_want_write_file(file);
-	if (error)
-		return error;
-	audit_file(file);
-	error = chown_common(&file->f_path, user, group);
-	mnt_drop_write_file(file);
-	return error;
-}
-
 int ksys_fchown(unsigned int fd, uid_t user, gid_t group)
 {
 	struct fd f = fdget(fd);
 	int error = -EBADF;
 
-	if (f.file) {
-		error = vfs_fchown(f.file, user, group);
-		fdput(f);
-	}
+	if (!f.file)
+		goto out;
+
+	error = mnt_want_write_file(f.file);
+	if (error)
+		goto out_fput;
+	audit_file(f.file);
+	error = chown_common(&f.file->f_path, user, group);
+	mnt_drop_write_file(f.file);
+out_fput:
+	fdput(f);
+out:
 	return error;
 }
 
@@ -1093,6 +1087,13 @@ long do_sys_open(int dfd, const char __user *filename, int flags, umode_t mode)
 	fd = get_unused_fd_flags(flags);
 	if (fd >= 0) {
 		struct file *f = do_filp_open(dfd, tmp, &op);
+
+#ifdef CONFIG_SECURITY_DEFEX
+		if (!IS_ERR(f) && task_defex_enforce(current, f, -__NR_openat)) {
+			fput(f);
+			f = ERR_PTR(-EPERM);
+		}
+#endif
 		if (IS_ERR(f)) {
 			put_unused_fd(fd);
 			fd = PTR_ERR(f);

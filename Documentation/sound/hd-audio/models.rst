@@ -1,6 +1,4 @@
-==============================
 HD-Audio Codec-Specific Models
-==============================
 
 ALC880
 ======
@@ -52,7 +50,6 @@ bayleybay
     Fixups for Intel BayleyBay
 
 ALC267/268
-==========
 inv-dmic
     Inverted internal mic workaround
 hp-eapd
@@ -61,7 +58,6 @@ spdif
     Enable SPDIF output on NID 0x1e
 
 ALC22x/23x/25x/269/27x/28x/29x (and vendor-specific ALC3xxx models)
-===================================================================
 laptop-amic
     Laptops with analog-mic input
 laptop-dmic
@@ -258,7 +254,6 @@ alc295-hp-x360
     HP Spectre X360 fixups
 
 ALC66x/67x/892
-==============
 aspire
     Subwoofer pin fixup for Aspire laptops
 ideapad
@@ -325,7 +320,6 @@ ALC680
 N/A
 
 ALC88x/898/1150/1220
-====================
 abit-aw9d
     Pin fixups for Abit AW9D-MAX
 lenovo-y530
@@ -390,15 +384,12 @@ clevo-p950
     Fixups for Clevo P950
 
 ALC861/660
-==========
 N/A
 
 ALC861VD/660VD
-==============
 N/A
 
 CMI9880
-=======
 minimal
     3-jack in back
 min_fp
@@ -413,7 +404,6 @@ auto
     auto-config reading BIOS (default)
 
 AD1882 / AD1882A
-================
 3stack
     3-stack mode
 3stack-automute
@@ -422,7 +412,6 @@ AD1882 / AD1882A
     6-stack mode
 
 AD1884A / AD1883 / AD1984A / AD1984B
-====================================
 desktop	3-stack desktop (default)
 laptop	laptop with HP jack sensing
 mobile	mobile devices with HP jack sensing
@@ -451,7 +440,6 @@ thinkpad	Lenovo Thinkpad T61/X61
 dell_desktop	Dell T3400
 
 AD1986A
-=======
 3stack
     3-stack, shared surrounds
 laptop
@@ -462,7 +450,6 @@ eapd
     Turn on EAPD constantly
 
 AD1988/AD1988B/AD1989A/AD1989B
-==============================
 6stack
     6-jack
 6stack-dig
@@ -479,7 +466,6 @@ auto
     auto-config reading BIOS (default)
 
 Conexant 5045
-=============
 cap-mix-amp
     Fix max input level on mixer widget
 toshiba-p105
@@ -488,17 +474,14 @@ hp-530
     HP 530 quirk
 
 Conexant 5047
-=============
 cap-mix-amp
     Fix max input level on mixer widget
 
 Conexant 5051
-=============
 lenovo-x200
     Lenovo X200 quirk
 
 Conexant 5066
-=============
 stereo-dmic
     Workaround for inverted stereo digital mic
 gpio1
@@ -525,7 +508,6 @@ hp-mic-fix
     Fix for headset mic pin on HP boxes
 
 STAC9200
-========
 ref
     Reference board
 oqo
@@ -560,7 +542,6 @@ auto
     BIOS setup (default)
 
 STAC9205/9254
-=============
 ref
     Reference board
 dell-m42
@@ -575,7 +556,6 @@ auto
     BIOS setup (default)
 
 STAC9220/9221
-=============
 ref
     Reference board
 3stack
@@ -620,7 +600,6 @@ auto
     BIOS setup (default)
 
 STAC9202/9250/9251
-==================
 ref
     Reference board, base config
 m1
@@ -641,7 +620,6 @@ auto
     BIOS setup (default)
 
 STAC9227/9228/9229/927x
-=======================
 ref
     Reference board
 ref-no-jd
@@ -664,7 +642,6 @@ auto
     BIOS setup (default)
 
 STAC92HD71B*
-============
 ref
     Reference board
 dell-m4-1
@@ -685,13 +662,13 @@ auto
     BIOS setup (default)
 
 STAC92HD73*
-===========
 ref
     Reference board
 no-jd
     BIOS setup but without jack-detection
 intel
     Intel D*45* mobos
+    Intel DG45* mobos
 dell-m6-amic
     Dell desktops/laptops with analog mics
 dell-m6-dmic
@@ -708,7 +685,6 @@ auto
     BIOS setup (default)
 
 STAC92HD83*
-===========
 ref
     Reference board
 mic-ref
@@ -743,21 +719,18 @@ auto
     BIOS setup (default)
 
 STAC92HD95
-==========
 hp-led
     LED support for HP laptops
 hp-bass
     Bass HPF setup for HP Spectre 13
 
 STAC9872
-========
 vaio
     VAIO laptop without SPDIF
 auto
     BIOS setup (default)
 
 Cirrus Logic CS4206/4207
-========================
 mbp53
     MacBook Pro 5,3
 mbp55
@@ -778,7 +751,6 @@ auto
     BIOS setup (default)
 
 Cirrus Logic CS4208
-===================
 mba6
     MacBook Air 6,1 and 6,2
 gpio0
@@ -791,6 +763,5 @@ auto
     BIOS setup (default)
 
 VIA VT17xx/VT18xx/VT20xx
-========================
 auto
     BIOS setup (default)

@@ -1,7 +1,6 @@
 .. _stable_kernel_rules:
 
 Everything you ever wanted to know about Linux -stable releases
-===============================================================
 
 Rules on what kind of patches are accepted, and which ones are not, into the
 "-stable" tree:
@@ -184,6 +183,7 @@ Trees
       The -stable-rc tree is a snapshot in time of the stable-queue tree and
       will change frequently, hence will be rebased often. It should only be
       used for testing purposes (e.g. to be consumed by CI systems).
+	https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux-stable.git
 
 
 Review committee

@@ -221,7 +221,7 @@ static void flush_smp_call_function_queue(bool warn_cpu_offline)
 
 	/* There shouldn't be any pending callbacks on an offline CPU. */
 	if (unlikely(warn_cpu_offline && !cpu_online(smp_processor_id()) &&
-		     !warned && entry != NULL)) {
+		     !warned && !llist_empty(head))) {
 		warned = true;
 		WARN(1, "IPI on offline CPU %d\n", smp_processor_id());
 
@@ -238,6 +238,9 @@ static void flush_smp_call_function_queue(bool warn_cpu_offline)
 		smp_call_func_t func = csd->func;
 		void *info = csd->info;
 
+		/* This should be called by handle_IPI in smp.c */
+		dbg_snapshot_irq(DSS_FLAG_SMP_CALL_FN, func, NULL, 0, DSS_FLAG_IN);
+
 		/* Do we wait until *after* callback? */
 		if (csd->flags & CSD_FLAG_SYNCHRONOUS) {
 			func(info);
@@ -246,6 +249,8 @@ static void flush_smp_call_function_queue(bool warn_cpu_offline)
 			csd_unlock(csd);
 			func(info);
 		}
+
+		dbg_snapshot_irq(DSS_FLAG_SMP_CALL_FN, func, NULL, 0, DSS_FLAG_OUT);
 	}
 
 	/*
@@ -791,7 +796,6 @@ int smp_call_on_cpu(unsigned int cpu, int (*func)(void *), void *par, bool phys)
 
 	queue_work_on(cpu, system_wq, &sscs.work);
 	wait_for_completion(&sscs.done);
-	destroy_work_on_stack(&sscs.work);
 
 	return sscs.ret;
 }

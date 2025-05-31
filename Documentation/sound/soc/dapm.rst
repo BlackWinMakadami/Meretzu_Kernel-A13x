@@ -1,9 +1,6 @@
-===================================================
 Dynamic Audio Power Management for Portable Devices
-===================================================
 
 Description
-===========
 
 Dynamic Audio Power Management (DAPM) is designed to allow portable
 Linux devices to use the minimum amount of power within the audio
@@ -55,7 +52,6 @@ widgets hereafter.
 
 
 DAPM Widgets
-============
 
 Audio DAPM widgets fall into a number of types:-
 
@@ -235,6 +231,7 @@ a virtual widget - a widget with no control bits e.g.
 ::
 
   SND_SOC_DAPM_MIXER("AC97 Mixer", SND_SOC_NOPM, 0, 0, NULL, 0),
+  SND_SOC_DAPM_MIXER("AC97 Mixer", SND_SOC_DAPM_NOPM, 0, 0, NULL, 0),
 
 This can be used to merge to signal paths together in software.
 
@@ -243,7 +240,6 @@ subsystem individually with a call to snd_soc_dapm_new_control().
 
 
 Codec/DSP Widget Interconnections
-=================================
 
 Widgets are connected to each other within the codec, platform and machine by
 audio paths (called interconnections). Each interconnection must be defined in
@@ -308,7 +304,6 @@ and pins that are NC respectively.
 
 
 Endpoint Widgets
-================
 An endpoint is a start or end point (widget) of an audio signal within the
 machine and includes the codec. e.g.
 
@@ -324,7 +319,6 @@ jacks can also be switched OFF.
 
 
 DAPM Widget Events
-==================
 
 Some widgets can register their interest with the DAPM core in PM events.
 e.g. A Speaker with an amplifier registers a widget so the amplifier can be

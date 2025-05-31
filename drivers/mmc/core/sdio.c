@@ -171,6 +171,7 @@ static int sdio_read_cccr(struct mmc_card *card, u32 ocr)
 				if (data & SDIO_UHS_SDR104)
 					card->sw_caps.sd3_bus_mode
 						|= SD_MODE_UHS_SDR104;
+
 			}
 
 			ret = mmc_io_rw_direct(card, 0, 0,
@@ -634,8 +635,6 @@ try_again:
 	if (host->ops->init_card)
 		host->ops->init_card(host, card);
 
-	card->ocr = ocr_card;
-
 	/*
 	 * If the host and card support UHS-I mode request the card
 	 * to switch to 1.8V signaling level.  No 1.8v signalling if
@@ -742,7 +741,7 @@ try_again:
 
 		card = oldcard;
 	}
-
+	card->ocr = ocr_card;
 	mmc_fixup_device(card, sdio_fixup_methods);
 
 	if (card->type == MMC_TYPE_SD_COMBO) {
@@ -768,7 +767,15 @@ try_again:
 	/* Initialization sequence for UHS-I cards */
 	/* Only if card supports 1.8v and UHS signaling */
 	if ((ocr & R4_18V_PRESENT) && card->sw_caps.sd3_bus_mode) {
+#if defined(CONFIG_BCM43456)
+		if (!oldcard)
+			host->card = card;
 		err = mmc_sdio_init_uhs_card(card);
+		if (!oldcard)
+			host->card = NULL;
+#else 
+		err = mmc_sdio_init_uhs_card(card);
+#endif /* CONFIG_BCM43456 */
 		if (err)
 			goto remove;
 	} else {
@@ -963,11 +970,7 @@ static int mmc_sdio_resume(struct mmc_host *host)
 	/* Basic card reinitialization. */
 	mmc_claim_host(host);
 
-	/*
-	 * Restore power and reinitialize the card when needed. Note that a
-	 * removable card is checked from a detect work later on in the resume
-	 * process.
-	 */
+	/* Restore power if needed */
 	if (!mmc_card_keep_power(host)) {
 		mmc_power_up(host, host->card->ocr);
 		/*
@@ -981,16 +984,14 @@ static int mmc_sdio_resume(struct mmc_host *host)
 			pm_runtime_set_active(&host->card->dev);
 			pm_runtime_enable(&host->card->dev);
 		}
-		err = mmc_sdio_reinit_card(host, 0);
-	} else if (mmc_card_wake_sdio_irq(host)) {
-		/*
-		 * We may have switched to 1-bit mode during suspend,
-		 * need to hold retuning, because tuning only supprt
-		 * 4-bit mode or 8 bit mode.
-		 */
-		mmc_retune_hold_now(host);
+	}
+
+	/* No need to reinitialize powered-resumed nonremovable cards */
+	if (mmc_card_is_removable(host) || !mmc_card_keep_power(host)) {
+		err = mmc_sdio_reinit_card(host, mmc_card_keep_power(host));
+	} else if (mmc_card_keep_power(host) && mmc_card_wake_sdio_irq(host)) {
+		/* We may have switched to 1-bit mode during suspend */
 		err = sdio_enable_4bit_bus(host->card);
-		mmc_retune_release(host);
 	}
 
 	if (err)
@@ -1201,6 +1202,13 @@ int mmc_attach_sdio(struct mmc_host *host)
 			goto remove_added;
 	}
 
+#if defined(CONFIG_BCM43456)
+        if(!strcmp("mmc1", mmc_hostname(host))) {
+            printk("%s: Set Nonremovable flag\n",mmc_hostname(host));
+            host->caps |= MMC_CAP_NONREMOVABLE;
+        }
+#endif /* CONFIG_BCM43456 */
+
 	if (host->caps & MMC_CAP_POWER_OFF_CARD)
 		pm_runtime_put(&card->dev);
 
@@ -1228,3 +1236,44 @@ err:
 	return err;
 }
 
+#if defined(CONFIG_BCM43456)
+int sdio_reset_comm(struct mmc_card *card)
+{
+	struct mmc_host *host = card->host;
+	u32 ocr;
+	u32 rocr;
+	int err;
+
+	printk("%s():\n", __func__);
+	mmc_claim_host(host);
+
+	mmc_retune_disable(host);
+
+	mmc_go_idle(host);
+
+	mmc_set_clock(host, host->f_min);
+
+	err = mmc_send_io_op_cond(host, 0, &ocr);
+	if (err)
+		goto err;
+
+	rocr = mmc_select_voltage(host, ocr);
+	if (!rocr) {
+		err = -EINVAL;
+		goto err;
+	}
+
+	err = mmc_sdio_init_card(host, rocr, card, 0);
+	if (err)
+		goto err;
+
+	mmc_release_host(host);
+	return 0;
+err:
+	printk("%s: Error resetting SDIO communications (%d)\n",
+	       mmc_hostname(host), err);
+	mmc_release_host(host);
+	return err;
+}
+EXPORT_SYMBOL(sdio_reset_comm);
+#endif  /* CONFIG_BCM43456 */

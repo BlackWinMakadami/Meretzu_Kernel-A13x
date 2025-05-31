@@ -224,7 +224,7 @@ static int pci_dev_str_match_path(struct pci_dev *dev, const char *path,
 
 	*endptr = strchrnul(path, ';');
 
-	wpath = kmemdup_nul(path, *endptr - path, GFP_ATOMIC);
+	wpath = kmemdup_nul(path, *endptr - path, GFP_KERNEL);
 	if (!wpath)
 		return -ENOMEM;
 
@@ -1591,7 +1591,11 @@ static int pci_enable_device_flags(struct pci_dev *dev, unsigned long flags)
 	 * so that things like MSI message writing will behave as expected
 	 * (e.g. if the device really is in D0 at enable time).
 	 */
-	pci_update_current_state(dev, dev->current_state);
+	if (dev->pm_cap) {
+		u16 pmcsr;
+		pci_read_config_word(dev, dev->pm_cap + PCI_PM_CTRL, &pmcsr);
+		dev->current_state = (pmcsr & PCI_PM_CTRL_STATE_MASK);
+	}
 
 	if (atomic_inc_return(&dev->enable_cnt) > 1)
 		return 0;		/* already enabled */
@@ -2166,14 +2170,7 @@ static int __pci_enable_wake(struct pci_dev *dev, pci_power_t state, bool enable
 	if (enable) {
 		int error;
 
-		/*
-		 * Enable PME signaling if the device can signal PME from
-		 * D3cold regardless of whether or not it can signal PME from
-		 * the current target state, because that will allow it to
-		 * signal PME when the hierarchy above it goes into D3cold and
-		 * the device itself ends up in D3cold as a result of that.
-		 */
-		if (pci_pme_capable(dev, state) || pci_pme_capable(dev, PCI_D3cold))
+		if (pci_pme_capable(dev, state))
 			pci_pme_active(dev, true);
 		else
 			ret = 1;
@@ -2277,20 +2274,16 @@ static pci_power_t pci_target_state(struct pci_dev *dev, bool wakeup)
 	if (dev->current_state == PCI_D3cold)
 		target_state = PCI_D3cold;
 
-	if (wakeup && dev->pme_support) {
-		pci_power_t state = target_state;
-
+	if (wakeup) {
 		/*
 		 * Find the deepest state from which the device can generate
 		 * PME#.
 		 */
-		while (state && !(dev->pme_support & (1 << state)))
-			state--;
-
-		if (state)
-			return state;
-		else if (dev->pme_support & 1)
-			return PCI_D0;
+		if (dev->pme_support) {
+			while (target_state
+			      && !(dev->pme_support & (1 << target_state)))
+				target_state--;
+		}
 	}
 
 	return target_state;
@@ -2516,30 +2509,6 @@ static const struct dmi_system_id bridge_d3_blacklist[] = {
 		.matches = {
 			DMI_MATCH(DMI_BOARD_VENDOR, "Gigabyte Technology Co., Ltd."),
 			DMI_MATCH(DMI_BOARD_NAME, "X299 DESIGNARE EX-CF"),
-		},
-	},
-	{
-		/*
-		 * Downstream device is not accessible after putting a root port
-		 * into D3cold and back into D0 on Elo Continental Z2 board
-		 */
-		.ident = "Elo Continental Z2",
-		.matches = {
-			DMI_MATCH(DMI_BOARD_VENDOR, "Elo Touch Solutions"),
-			DMI_MATCH(DMI_BOARD_NAME, "Geminilake"),
-			DMI_MATCH(DMI_BOARD_VERSION, "Continental Z2"),
-		},
-	},
-	{
-		/*
-		 * Changing power state of root port dGPU is connected fails
-		 * https://gitlab.freedesktop.org/drm/amd/-/issues/3229
-		 */
-		.ident = "Hewlett-Packard HP Pavilion 17 Notebook PC/1972",
-		.matches = {
-			DMI_MATCH(DMI_BOARD_VENDOR, "Hewlett-Packard"),
-			DMI_MATCH(DMI_BOARD_NAME, "1972"),
-			DMI_MATCH(DMI_BOARD_VERSION, "95.33"),
 		},
 	},
 #endif
@@ -3092,6 +3061,7 @@ void pci_request_acs(void)
 {
 	pci_acs_enable = 1;
 }
+EXPORT_SYMBOL_GPL(pci_request_acs);
 
 static const char *disable_acs_redir_param;
 
@@ -4681,18 +4651,18 @@ static int pci_dev_reset_slot_function(struct pci_dev *dev, int probe)
 
 static void pci_dev_lock(struct pci_dev *dev)
 {
+	pci_cfg_access_lock(dev);
 	/* block PM suspend, driver probe, etc. */
 	device_lock(&dev->dev);
-	pci_cfg_access_lock(dev);
 }
 
 /* Return 1 on successful lock, 0 on contention */
 static int pci_dev_trylock(struct pci_dev *dev)
 {
-	if (device_trylock(&dev->dev)) {
-		if (pci_cfg_access_trylock(dev))
+	if (pci_cfg_access_trylock(dev)) {
+		if (device_trylock(&dev->dev))
 			return 1;
-		device_unlock(&dev->dev);
+		pci_cfg_access_unlock(dev);
 	}
 
 	return 0;
@@ -4700,8 +4670,8 @@ static int pci_dev_trylock(struct pci_dev *dev)
 
 static void pci_dev_unlock(struct pci_dev *dev)
 {
-	pci_cfg_access_unlock(dev);
 	device_unlock(&dev->dev);
+	pci_cfg_access_unlock(dev);
 }
 
 static void pci_dev_save_and_disable(struct pci_dev *dev)
@@ -4957,12 +4927,10 @@ static void pci_bus_lock(struct pci_bus *bus)
 {
 	struct pci_dev *dev;
 
-	pci_dev_lock(bus->self);
 	list_for_each_entry(dev, &bus->devices, bus_list) {
+		pci_dev_lock(dev);
 		if (dev->subordinate)
 			pci_bus_lock(dev->subordinate);
-		else
-			pci_dev_lock(dev);
 	}
 }
 
@@ -4974,10 +4942,8 @@ static void pci_bus_unlock(struct pci_bus *bus)
 	list_for_each_entry(dev, &bus->devices, bus_list) {
 		if (dev->subordinate)
 			pci_bus_unlock(dev->subordinate);
-		else
-			pci_dev_unlock(dev);
+		pci_dev_unlock(dev);
 	}
-	pci_dev_unlock(bus->self);
 }
 
 /* Return 1 on successful lock, 0 on contention */
@@ -4985,15 +4951,15 @@ static int pci_bus_trylock(struct pci_bus *bus)
 {
 	struct pci_dev *dev;
 
-	if (!pci_dev_trylock(bus->self))
-		return 0;
-
 	list_for_each_entry(dev, &bus->devices, bus_list) {
-		if (dev->subordinate) {
-			if (!pci_bus_trylock(dev->subordinate))
-				goto unlock;
-		} else if (!pci_dev_trylock(dev))
+		if (!pci_dev_trylock(dev))
 			goto unlock;
+		if (dev->subordinate) {
+			if (!pci_bus_trylock(dev->subordinate)) {
+				pci_dev_unlock(dev);
+				goto unlock;
+			}
+		}
 	}
 	return 1;
 
@@ -5001,10 +4967,8 @@ unlock:
 	list_for_each_entry_continue_reverse(dev, &bus->devices, bus_list) {
 		if (dev->subordinate)
 			pci_bus_unlock(dev->subordinate);
-		else
-			pci_dev_unlock(dev);
+		pci_dev_unlock(dev);
 	}
-	pci_dev_unlock(bus->self);
 	return 0;
 }
 
@@ -5036,10 +5000,9 @@ static void pci_slot_lock(struct pci_slot *slot)
 	list_for_each_entry(dev, &slot->bus->devices, bus_list) {
 		if (!dev->slot || dev->slot != slot)
 			continue;
+		pci_dev_lock(dev);
 		if (dev->subordinate)
 			pci_bus_lock(dev->subordinate);
-		else
-			pci_dev_lock(dev);
 	}
 }
 
@@ -5065,13 +5028,14 @@ static int pci_slot_trylock(struct pci_slot *slot)
 	list_for_each_entry(dev, &slot->bus->devices, bus_list) {
 		if (!dev->slot || dev->slot != slot)
 			continue;
+		if (!pci_dev_trylock(dev))
+			goto unlock;
 		if (dev->subordinate) {
 			if (!pci_bus_trylock(dev->subordinate)) {
 				pci_dev_unlock(dev);
 				goto unlock;
 			}
-		} else if (!pci_dev_trylock(dev))
-			goto unlock;
+		}
 	}
 	return 1;
 
@@ -5082,8 +5046,7 @@ unlock:
 			continue;
 		if (dev->subordinate)
 			pci_bus_unlock(dev->subordinate);
-		else
-			pci_dev_unlock(dev);
+		pci_dev_unlock(dev);
 	}
 	return 0;
 }
@@ -5594,9 +5557,7 @@ enum pci_bus_speed pcie_get_speed_cap(struct pci_dev *dev)
 	 */
 	pcie_capability_read_dword(dev, PCI_EXP_LNKCAP2, &lnkcap2);
 	if (lnkcap2) { /* PCIe r3.0-compliant */
-		if (lnkcap2 & PCI_EXP_LNKCAP2_SLS_32_0GB)
-			return PCIE_SPEED_32_0GT;
-		else if (lnkcap2 & PCI_EXP_LNKCAP2_SLS_16_0GB)
+		if (lnkcap2 & PCI_EXP_LNKCAP2_SLS_16_0GB)
 			return PCIE_SPEED_16_0GT;
 		else if (lnkcap2 & PCI_EXP_LNKCAP2_SLS_8_0GB)
 			return PCIE_SPEED_8_0GT;
@@ -5836,8 +5797,6 @@ bool pci_device_is_present(struct pci_dev *pdev)
 {
 	u32 v;
 
-	/* Check PF if pdev is a VF, since VF Vendor/Device IDs are 0xffff */
-	pdev = pci_physfn(pdev);
 	if (pci_dev_is_disconnected(pdev))
 		return false;
 	return pci_bus_read_dev_vendor_id(pdev->bus, pdev->devfn, &v, 0);

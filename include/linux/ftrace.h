@@ -224,8 +224,16 @@ extern enum ftrace_tracing_type_t ftrace_tracing_type;
 int register_ftrace_function(struct ftrace_ops *ops);
 int unregister_ftrace_function(struct ftrace_ops *ops);
 
+#ifdef CONFIG_CFI_CLANG
+/* Use a C stub with the correct type for CFI */
+static inline void ftrace_stub(unsigned long a0, unsigned long a1,
+			       struct ftrace_ops *op, struct pt_regs *regs)
+{
+}
+#else
 extern void ftrace_stub(unsigned long a0, unsigned long a1,
 			struct ftrace_ops *op, struct pt_regs *regs);
+#endif
 
 #else /* !CONFIG_FUNCTION_TRACER */
 /*
@@ -689,7 +697,7 @@ static inline void __ftrace_enabled_restore(int enabled)
 #define CALLER_ADDR5 ((unsigned long)ftrace_return_address(5))
 #define CALLER_ADDR6 ((unsigned long)ftrace_return_address(6))
 
-static __always_inline unsigned long get_lock_parent_ip(void)
+static inline unsigned long get_lock_parent_ip(void)
 {
 	unsigned long addr = CALLER_ADDR0;
 

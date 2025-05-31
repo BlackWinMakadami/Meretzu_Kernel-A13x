@@ -69,14 +69,6 @@ static bool migrate_one_irq(struct irq_desc *desc)
 	}
 
 	/*
-	 * Complete an eventually pending irq move cleanup. If this
-	 * interrupt was moved in hard irq context, then the vectors need
-	 * to be cleaned up. It can't wait until this interrupt actually
-	 * happens and this CPU was involved.
-	 */
-	irq_force_complete_move(desc);
-
-	/*
 	 * No move required, if:
 	 * - Interrupt is per cpu
 	 * - Interrupt is not started
@@ -93,6 +85,14 @@ static bool migrate_one_irq(struct irq_desc *desc)
 		irq_fixup_move_pending(desc, false);
 		return false;
 	}
+
+	/*
+	 * Complete an eventually pending irq move cleanup. If this
+	 * interrupt was moved in hard irq context, then the vectors need
+	 * to be cleaned up. It can't wait until this interrupt actually
+	 * happens and this CPU was involved.
+	 */
+	irq_force_complete_move(desc);
 
 	/*
 	 * If there is a setaffinity pending, then try to reuse the pending
@@ -121,6 +121,8 @@ static bool migrate_one_irq(struct irq_desc *desc)
 		}
 		affinity = cpu_online_mask;
 		brokeaff = true;
+	} else if (unlikely(d->common->state_use_accessors & IRQD_GIC_MULTI_TARGET)) {
+		return false;
 	}
 	/*
 	 * Do not set the force argument of irq_do_set_affinity() as this

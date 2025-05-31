@@ -16,7 +16,6 @@ Added Sysfs information: 2006/04/24
   - Mitch Williams <mitch.a.williams at intel.com>
 
 Introduction
-============
 
 	The Linux bonding driver provides a method for aggregating
 multiple network interfaces into a single logical "bonded" interface.
@@ -33,7 +32,6 @@ with this version of the driver.
 who to ask for help, please follow the links at the end of this file.
 
 Table of Contents
-=================
 
 1. Bonding Driver Installation
 
@@ -102,7 +100,6 @@ Table of Contents
 
 
 1. Bonding Driver Installation
-==============================
 
 	Most popular distro kernels ship with the bonding driver
 already available as a module. If your distro does not, or you
@@ -133,7 +130,6 @@ to the driver or configure more than one bonding device.
 or sysfs, the old ifenslave control utility is obsolete.
 
 2. Bonding Driver Options
-=========================
 
 	Options for the bonding driver are supplied as parameters to the
 bonding module at load time, or are specified via sysfs.
@@ -197,6 +193,11 @@ ad_actor_system
 	local-admin bit set for this mac but driver does not enforce it. If
 	the value is not given then system defaults to using the masters'
 	mac address as actors' system address.
+	protocol packet exchanges (LACPDUs). The value cannot be NULL or
+	multicast. It is preferred to have the local-admin bit set for this
+	mac but driver does not enforce it. If the value is not given then
+	system defaults to using the masters' mac address as actors' system
+	address.
 
 	This parameter has effect only in 802.3ad mode and is available through
 	SysFs interface.
@@ -966,7 +967,6 @@ lp_interval
 	has effect only in balance-tlb and balance-alb modes.
 
 3. Configuring Bonding Devices
-==============================
 
 	You can configure bonding using either your distro's network
 initialization scripts, or manually using either iproute2 or the
@@ -1708,7 +1708,6 @@ few bonding parameters:
 
 
 4 Querying Bonding Configuration
-=================================
 
 4.1 Bonding Configuration
 -------------------------
@@ -1776,7 +1775,6 @@ eth1      Link encap:Ethernet  HWaddr 00:C0:F0:1F:37:B4
           Interrupt:9 Base address:0x1400
 
 5. Switch Configuration
-=======================
 
 	For this section, "switch" refers to whatever system the
 bonded devices are directly connected to (i.e., where the other end of
@@ -1809,7 +1807,6 @@ with another EtherChannel group.
 
 
 6. 802.1q VLAN Support
-======================
 
 	It is possible to configure VLAN devices over a bond interface
 using the 8021q driver.  However, only packets coming from the 8021q
@@ -1860,7 +1857,6 @@ mode, which might not be what you want.
 
 
 7. Link Monitoring
-==================
 
 	The bonding driver at present supports two schemes for
 monitoring a slave device's link state: the ARP monitor and the MII
@@ -1938,7 +1934,6 @@ and ethtool requests), then the MII monitor will assume the link is
 up.
 
 8. Potential Sources of Trouble
-===============================
 
 8.1 Adventures in Routing
 -------------------------
@@ -2048,7 +2043,6 @@ beyond other ports of a switch, or if a switch is refusing to pass
 traffic while still maintaining carrier on.
 
 9. SNMP agents
-===============
 
 	If running SNMP agents, the bonding driver should be loaded
 before any network drivers participating in a bond.  This requirement
@@ -2094,7 +2088,6 @@ and SNMP functions such as Interface_Scan_Next will report that
 association.
 
 10. Promiscuous mode
-====================
 
 	When running network monitoring tools, e.g., tcpdump, it is
 common to enable promiscuous mode on the device, so that all traffic
@@ -2121,7 +2114,6 @@ the active slave changes (e.g., due to a link failure), the
 promiscuous setting will be propagated to the new active slave.
 
 11. Configuring Bonding for High Availability
-=============================================
 
 	High Availability refers to configurations that provide
 maximum network availability by having redundant or backup devices,
@@ -2224,7 +2216,6 @@ switch, but this can be a viable alternative to the ARP monitor when using
 suitable switches.
 
 12. Configuring Bonding for Maximum Throughput
-==============================================
 
 12.1 Maximizing Throughput in a Single Switch Topology
 ------------------------------------------------------
@@ -2491,7 +2482,6 @@ needed as the number of systems involved grows (remember that each
 host in the network is configured with bonding).
 
 13. Switch Behavior Issues
-==========================
 
 13.1 Link Establishment and Failover Delays
 -------------------------------------------
@@ -2572,7 +2562,6 @@ most Cisco switches, the privileged command "clear mac address-table
 dynamic" will accomplish this).
 
 14. Hardware Specific Considerations
-====================================
 
 	This section contains additional information for configuring
 bonding on specific hardware platforms, or for interfacing bonding
@@ -2682,7 +2671,6 @@ avoid fail-over delay issues when using bonding.
 
 	
 15. Frequently Asked Questions
-==============================
 
 1.  Is it SMP safe?
 
@@ -2789,7 +2777,6 @@ then restore the MAC addresses that the slaves had before they were
 enslaved.
 
 16. Resources and Links
-=======================
 
 	The latest version of the bonding driver can be found in the latest
 version of the linux kernel, found on http://kernel.org

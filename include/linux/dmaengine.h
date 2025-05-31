@@ -795,7 +795,7 @@ struct dma_device {
 	struct dma_async_tx_descriptor *(*device_prep_dma_cyclic)(
 		struct dma_chan *chan, dma_addr_t buf_addr, size_t buf_len,
 		size_t period_len, enum dma_transfer_direction direction,
-		unsigned long flags);
+		unsigned long flags, void *context);
 	struct dma_async_tx_descriptor *(*device_prep_interleaved_dma)(
 		struct dma_chan *chan, struct dma_interleaved_template *xt,
 		unsigned long flags);
@@ -827,8 +827,7 @@ static inline int dmaengine_slave_config(struct dma_chan *chan,
 
 static inline bool is_slave_direction(enum dma_transfer_direction direction)
 {
-	return (direction == DMA_MEM_TO_DEV) || (direction == DMA_DEV_TO_MEM) ||
-	       (direction == DMA_DEV_TO_DEV);
+	return (direction == DMA_MEM_TO_DEV) || (direction == DMA_DEV_TO_MEM);
 }
 
 static inline struct dma_async_tx_descriptor *dmaengine_prep_slave_single(
@@ -882,7 +881,7 @@ static inline struct dma_async_tx_descriptor *dmaengine_prep_dma_cyclic(
 		return NULL;
 
 	return chan->device->device_prep_dma_cyclic(chan, buf_addr, buf_len,
-						period_len, dir, flags);
+						period_len, dir, flags, NULL);
 }
 
 static inline struct dma_async_tx_descriptor *dmaengine_prep_interleaved_dma(

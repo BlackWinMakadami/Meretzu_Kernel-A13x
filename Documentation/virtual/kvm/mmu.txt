@@ -1,5 +1,4 @@
 The x86 kvm shadow mmu
-======================
 
 The mmu (in arch/x86/kvm, files mmu.[ch] and paging_tmpl.h) is responsible
 for presenting a standard x86 mmu to the guest, while translating guest
@@ -26,7 +25,6 @@ The mmu code attempts to satisfy the following requirements:
 - reliability:  avoid multipage or GFP_ATOMIC allocations
 
 Acronyms
-========
 
 pfn   host page frame number
 hpa   host physical address
@@ -43,7 +41,6 @@ spte  shadow pte (referring to pfns)
 tdp   two dimensional paging (vendor neutral term for NPT and EPT)
 
 Virtual and real hardware supported
-===================================
 
 The mmu supports first-generation mmu hardware, which allows an atomic switch
 of the current paging mode and cr3 during guest entry, as well as
@@ -53,7 +50,6 @@ pages, pae, pse, pse36, cr0.wp, and 1GB pages. Emulated hardware also
 able to expose NPT capable hardware on NPT capable hosts.
 
 Translation
-===========
 
 The primary job of the mmu is to program the processor's mmu to translate
 addresses for the guest.  Different translations are required at different
@@ -100,7 +96,6 @@ Host generated events:
 - memory pressure (the shrinker)
 
 Shadow pages
-============
 
 The principal data structure is the shadow page, 'struct kvm_mmu_page'.  A
 shadow page contains 512 sptes, which can be either leaf or nonleaf sptes.  A
@@ -154,6 +149,8 @@ Shadow pages contain the following information:
   role.access:
     Inherited guest access permissions from the parent ptes in the form uwx.
     Note execute permission is positive, not negative.
+    Inherited guest access permissions in the form uwx.  Note execute
+    permission is positive, not negative.
   role.invalid:
     The page is invalid and should not be used.  It is a root page that is
     currently pinned (by a cpu hardware register pointing to it); once it is
@@ -244,13 +241,11 @@ Shadow pages contain the following information:
     to avoid emulation in the future.
 
 Reverse map
-===========
 
 The mmu maintains a reverse mapping whereby all ptes mapping a page can be
 reached given its gfn.  This is used, for example, when swapping out a page.
 
 Synchronized and unsynchronized pages
-=====================================
 
 The guest uses two events to synchronize its tlb and page tables: tlb flushes
 and page invalidations (invlpg).
@@ -273,7 +268,6 @@ pages on a tlb flush.
 
 
 Reaction to events
-==================
 
 - guest page fault (or npt page fault, or ept violation)
 
@@ -340,7 +334,6 @@ Host translation updates:
   - drop (or update) translations
 
 Emulating cr0.wp
-================
 
 If tdp is not enabled, the host must keep cr0.wp=1 so page write protection
 works for the guest kernel, not guest guest userspace.  When the guest
@@ -380,7 +373,6 @@ changing cr4.smep to 1.  To avoid this, the value of !cr0.wp && cr4.smep
 is also made a part of the page role.
 
 Large pages
-===========
 
 The mmu supports all combinations of large and small guest and host pages.
 Supported page sizes include 4k, 2M, 4M, and 1G.  4M pages are treated as
@@ -403,7 +395,6 @@ a large spte.  The frames at the end of an unaligned memory slot have
 artificially inflated ->disallow_lpages so they can never be instantiated.
 
 Zapping all pages (page generation count)
-=========================================
 
 For the large memory guests, walking and zapping all pages is really slow
 (because there are a lot of pages), and also blocks memory accesses of
@@ -424,7 +415,6 @@ operation needs to take the MMU lock, the lock can be released periodically
 so that the VCPUs can make progress.
 
 Fast invalidation of MMIO sptes
-===============================
 
 As mentioned in "Reaction to events" above, kvm will cache MMIO
 information in leaf sptes.  When a new memslot is added or an existing
@@ -462,7 +452,6 @@ the next access to the spte will always be a cache miss.
 
 
 Further reading
-===============
 
 - NPT presentation from KVM Forum 2008
   http://www.linux-kvm.org/images/c/c8/KvmForum2008%24kdf2008_21.pdf

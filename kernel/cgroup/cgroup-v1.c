@@ -13,7 +13,6 @@
 #include <linux/delayacct.h>
 #include <linux/pid_namespace.h>
 #include <linux/cgroupstats.h>
-#include <linux/cpu.h>
 
 #include <trace/events/cgroup.h>
 
@@ -27,6 +26,9 @@
 
 /* Controllers blocked by the commandline in v1 */
 static u16 cgroup_no_v1_mask;
+
+/* disable named v1 mounts */
+static bool cgroup_no_v1_named;
 
 /*
  * pidlist destructions need to be flushed on cgroup destruction.  Use a
@@ -56,7 +58,6 @@ int cgroup_attach_task_all(struct task_struct *from, struct task_struct *tsk)
 	int retval = 0;
 
 	mutex_lock(&cgroup_mutex);
-	get_online_cpus();
 	percpu_down_write(&cgroup_threadgroup_rwsem);
 	for_each_root(root) {
 		struct cgroup *from_cgrp;
@@ -73,7 +74,6 @@ int cgroup_attach_task_all(struct task_struct *from, struct task_struct *tsk)
 			break;
 	}
 	percpu_up_write(&cgroup_threadgroup_rwsem);
-	put_online_cpus();
 	mutex_unlock(&cgroup_mutex);
 
 	return retval;
@@ -339,22 +339,6 @@ static struct cgroup_pidlist *cgroup_pidlist_find_create(struct cgroup *cgrp,
 	return l;
 }
 
-/**
- * cgroup_task_count - count the number of tasks in a cgroup.
- * @cgrp: the cgroup in question
- */
-int cgroup_task_count(const struct cgroup *cgrp)
-{
-	int count = 0;
-	struct cgrp_cset_link *link;
-
-	spin_lock_irq(&css_set_lock);
-	list_for_each_entry(link, &cgrp->cset_links, cset_link)
-		count += link->cset->nr_tasks;
-	spin_unlock_irq(&css_set_lock);
-	return count;
-}
-
 /*
  * Load a cgroup's pidarray with either procs' tgids or tasks' pids
  */
@@ -395,9 +379,10 @@ static int pidlist_array_load(struct cgroup *cgrp, enum cgroup_filetype type,
 	}
 	css_task_iter_end(&it);
 	length = n;
-	/* now sort & strip out duplicates (tgids or recycled thread PIDs) */
+	/* now sort & (if procs) strip out duplicates */
 	sort(array, length, sizeof(pid_t), cmppid, NULL);
-	length = pidlist_uniq(array, length);
+	if (type == CGROUP_FILE_PROCS)
+		length = pidlist_uniq(array, length);
 
 	l = cgroup_pidlist_find_create(cgrp, type);
 	if (!l) {
@@ -428,7 +413,6 @@ static void *cgroup_pidlist_start(struct seq_file *s, loff_t *pos)
 	 * next pid to display, if any
 	 */
 	struct kernfs_open_file *of = s->private;
-	struct cgroup_file_ctx *ctx = of->priv;
 	struct cgroup *cgrp = seq_css(s)->cgroup;
 	struct cgroup_pidlist *l;
 	enum cgroup_filetype type = seq_cft(s)->private;
@@ -438,24 +422,25 @@ static void *cgroup_pidlist_start(struct seq_file *s, loff_t *pos)
 	mutex_lock(&cgrp->pidlist_mutex);
 
 	/*
-	 * !NULL @ctx->procs1.pidlist indicates that this isn't the first
-	 * start() after open. If the matching pidlist is around, we can use
-	 * that. Look for it. Note that @ctx->procs1.pidlist can't be used
-	 * directly. It could already have been destroyed.
+	 * !NULL @of->priv indicates that this isn't the first start()
+	 * after open.  If the matching pidlist is around, we can use that.
+	 * Look for it.  Note that @of->priv can't be used directly.  It
+	 * could already have been destroyed.
 	 */
-	if (ctx->procs1.pidlist)
-		ctx->procs1.pidlist = cgroup_pidlist_find(cgrp, type);
+	if (of->priv)
+		of->priv = cgroup_pidlist_find(cgrp, type);
 
 	/*
 	 * Either this is the first start() after open or the matching
 	 * pidlist has been destroyed inbetween.  Create a new one.
 	 */
-	if (!ctx->procs1.pidlist) {
-		ret = pidlist_array_load(cgrp, type, &ctx->procs1.pidlist);
+	if (!of->priv) {
+		ret = pidlist_array_load(cgrp, type,
+					 (struct cgroup_pidlist **)&of->priv);
 		if (ret)
 			return ERR_PTR(ret);
 	}
-	l = ctx->procs1.pidlist;
+	l = of->priv;
 
 	if (pid) {
 		int end = l->length;
@@ -483,8 +468,7 @@ static void *cgroup_pidlist_start(struct seq_file *s, loff_t *pos)
 static void cgroup_pidlist_stop(struct seq_file *s, void *v)
 {
 	struct kernfs_open_file *of = s->private;
-	struct cgroup_file_ctx *ctx = of->priv;
-	struct cgroup_pidlist *l = ctx->procs1.pidlist;
+	struct cgroup_pidlist *l = of->priv;
 
 	if (l)
 		mod_delayed_work(cgroup_pidlist_destroy_wq, &l->destroy_dwork,
@@ -495,8 +479,7 @@ static void cgroup_pidlist_stop(struct seq_file *s, void *v)
 static void *cgroup_pidlist_next(struct seq_file *s, void *v, loff_t *pos)
 {
 	struct kernfs_open_file *of = s->private;
-	struct cgroup_file_ctx *ctx = of->priv;
-	struct cgroup_pidlist *l = ctx->procs1.pidlist;
+	struct cgroup_pidlist *l = of->priv;
 	pid_t *p = v;
 	pid_t *end = l->list + l->length;
 	/*
@@ -539,15 +522,15 @@ static ssize_t __cgroup1_procs_write(struct kernfs_open_file *of,
 		goto out_unlock;
 
 	/*
-	 * Even if we're attaching all tasks in the thread group, we only need
-	 * to check permissions on one of them. Check permissions using the
-	 * credentials from file open to protect against inherited fd attacks.
+	 * Even if we're attaching all tasks in the thread group, we only
+	 * need to check permissions on one of them.
 	 */
-	cred = of->file->f_cred;
+	cred = current_cred();
 	tcred = get_task_cred(task);
 	if (!uid_eq(cred->euid, GLOBAL_ROOT_UID) &&
 	    !uid_eq(cred->euid, tcred->uid) &&
-	    !uid_eq(cred->euid, tcred->suid))
+	    !uid_eq(cred->euid, tcred->suid) &&
+	    !ns_capable(tcred->user_ns, CAP_SYS_NICE))
 		ret = -EACCES;
 	put_cred(tcred);
 	if (ret)
@@ -581,14 +564,6 @@ static ssize_t cgroup_release_agent_write(struct kernfs_open_file *of,
 	struct cgroup *cgrp;
 
 	BUILD_BUG_ON(sizeof(cgrp->root->release_agent_path) < PATH_MAX);
-
-	/*
-	 * Release agent gets called with all capabilities,
-	 * require capabilities to set release agent.
-	 */
-	if ((of->file->f_cred->user_ns != &init_user_ns) ||
-	    !capable(CAP_SYS_ADMIN))
-		return -EPERM;
 
 	cgrp = cgroup_kn_lock_live(of->kn, false);
 	if (!cgrp)
@@ -981,6 +956,10 @@ static int parse_cgroupfs_options(char *data, struct cgroup_sb_opts *opts)
 		}
 		if (!strncmp(token, "name=", 5)) {
 			const char *name = token + 5;
+
+			/* blocked by boot param? */
+			if (cgroup_no_v1_named)
+				return -ENOENT;
 			/* Can't specify an empty name */
 			if (!strlen(name))
 				return -EINVAL;
@@ -1061,7 +1040,6 @@ static int cgroup1_remount(struct kernfs_root *kf_root, int *flags, char *data)
 {
 	int ret = 0;
 	struct cgroup_root *root = cgroup_root_from_kf(kf_root);
-	struct cgroup_namespace *ns = current->nsproxy->cgroup_ns;
 	struct cgroup_sb_opts opts;
 	u16 added_mask, removed_mask;
 
@@ -1075,12 +1053,6 @@ static int cgroup1_remount(struct kernfs_root *kf_root, int *flags, char *data)
 	if (opts.subsys_mask != root->subsys_mask || opts.release_agent)
 		pr_warn("option changes via remount are deprecated (pid=%d comm=%s)\n",
 			task_tgid_nr(current), current->comm);
-	/* See cgroup1_mount release_agent handling */
-	if (opts.release_agent &&
-	    ((ns->user_ns != &init_user_ns) || !capable(CAP_SYS_ADMIN))) {
-		ret = -EINVAL;
-		goto out_unlock;
-	}
 
 	added_mask = opts.subsys_mask & ~root->subsys_mask;
 	removed_mask = root->subsys_mask & ~opts.subsys_mask;
@@ -1134,13 +1106,11 @@ struct dentry *cgroup1_mount(struct file_system_type *fs_type, int flags,
 			     void *data, unsigned long magic,
 			     struct cgroup_namespace *ns)
 {
-	struct super_block *pinned_sb = NULL;
 	struct cgroup_sb_opts opts;
 	struct cgroup_root *root;
 	struct cgroup_subsys *ss;
 	struct dentry *dentry;
 	int i, ret;
-	bool new_root = false;
 
 	cgroup_lock_and_drain_offline(&cgrp_dfl_root.cgrp);
 
@@ -1202,29 +1172,6 @@ struct dentry *cgroup1_mount(struct file_system_type *fs_type, int flags,
 		if (root->flags ^ opts.flags)
 			pr_warn("new mount options do not match the existing superblock, will be ignored\n");
 
-		/*
-		 * We want to reuse @root whose lifetime is governed by its
-		 * ->cgrp.  Let's check whether @root is alive and keep it
-		 * that way.  As cgroup_kill_sb() can happen anytime, we
-		 * want to block it by pinning the sb so that @root doesn't
-		 * get killed before mount is complete.
-		 *
-		 * With the sb pinned, tryget_live can reliably indicate
-		 * whether @root can be reused.  If it's being killed,
-		 * drain it.  We can use wait_queue for the wait but this
-		 * path is super cold.  Let's just sleep a bit and retry.
-		 */
-		pinned_sb = kernfs_pin_sb(root->kf_root, NULL);
-		if (IS_ERR(pinned_sb) ||
-		    !percpu_ref_tryget_live(&root->cgrp.self.refcnt)) {
-			mutex_unlock(&cgroup_mutex);
-			if (!IS_ERR_OR_NULL(pinned_sb))
-				deactivate_super(pinned_sb);
-			msleep(10);
-			ret = restart_syscall();
-			goto out_free;
-		}
-
 		ret = 0;
 		goto out_unlock;
 	}
@@ -1244,30 +1191,26 @@ struct dentry *cgroup1_mount(struct file_system_type *fs_type, int flags,
 		ret = -EPERM;
 		goto out_unlock;
 	}
-	/*
-	 * Release agent gets called with all capabilities,
-	 * require capabilities to set release agent.
-	 */
-	if (opts.release_agent &&
-	    ((ns->user_ns != &init_user_ns) || !capable(CAP_SYS_ADMIN))) {
-		ret = -EINVAL;
-		goto out_unlock;
-	}
 
 	root = kzalloc(sizeof(*root), GFP_KERNEL);
 	if (!root) {
 		ret = -ENOMEM;
 		goto out_unlock;
 	}
-	new_root = true;
 
 	init_cgroup_root(root, &opts);
 
-	ret = cgroup_setup_root(root, opts.subsys_mask, PERCPU_REF_INIT_DEAD);
+	ret = cgroup_setup_root(root, opts.subsys_mask);
 	if (ret)
 		cgroup_free_root(root);
 
 out_unlock:
+	if (!ret && !percpu_ref_tryget_live(&root->cgrp.self.refcnt)) {
+		mutex_unlock(&cgroup_mutex);
+		msleep(10);
+		ret = restart_syscall();
+		goto out_free;
+	}
 	mutex_unlock(&cgroup_mutex);
 out_free:
 	kfree(opts.release_agent);
@@ -1279,25 +1222,13 @@ out_free:
 	dentry = cgroup_do_mount(&cgroup_fs_type, flags, root,
 				 CGROUP_SUPER_MAGIC, ns);
 
-	/*
-	 * There's a race window after we release cgroup_mutex and before
-	 * allocating a superblock. Make sure a concurrent process won't
-	 * be able to re-use the root during this window by delaying the
-	 * initialization of root refcnt.
-	 */
-	if (new_root) {
-		mutex_lock(&cgroup_mutex);
-		percpu_ref_reinit(&root->cgrp.self.refcnt);
-		mutex_unlock(&cgroup_mutex);
+	if (!IS_ERR(dentry) && percpu_ref_is_dying(&root->cgrp.self.refcnt)) {
+		struct super_block *sb = dentry->d_sb;
+		dput(dentry);
+		deactivate_locked_super(sb);
+		msleep(10);
+		dentry = ERR_PTR(restart_syscall());
 	}
-
-	/*
-	 * If @pinned_sb, we're reusing an existing root and holding an
-	 * extra ref on its sb.  Mount is complete.  Put the extra ref.
-	 */
-	if (pinned_sb)
-		deactivate_super(pinned_sb);
-
 	return dentry;
 }
 
@@ -1326,7 +1257,12 @@ static int __init cgroup_no_v1(char *str)
 
 		if (!strcmp(token, "all")) {
 			cgroup_no_v1_mask = U16_MAX;
-			break;
+			continue;
+		}
+
+		if (!strcmp(token, "named")) {
+			cgroup_no_v1_named = true;
+			continue;
 		}
 
 		for_each_subsys(ss, i) {

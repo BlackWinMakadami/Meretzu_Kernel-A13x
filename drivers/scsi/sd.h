@@ -2,6 +2,10 @@
 #ifndef _SCSI_DISK_H
 #define _SCSI_DISK_H
 
+#if defined(CONFIG_UFS_SRPMB)
+#include "scsi_srpmb.h"
+#endif
+
 /*
  * More than enough for everybody ;)  The huge number of majors
  * is a leftover from 16bit dev_t days, we don't really need that
@@ -117,6 +121,9 @@ struct scsi_disk {
 	unsigned	urswrz : 1;
 	unsigned	security : 1;
 	unsigned	ignore_medium_access_errors : 1;
+
+	ANDROID_KABI_RESERVE(1);
+	ANDROID_KABI_RESERVE(2);
 };
 #define to_scsi_disk(obj) container_of(obj,struct scsi_disk,dev)
 

@@ -61,7 +61,6 @@ most drivers up to 2.6.31, but I know I am missing some.  There has been
 no attempt to list non-X86 architectures or ioctls from drivers/staging/.
 
 Code  Seq#(hex)	Include File		Comments
-========================================================
 0x00	00-1F	linux/fs.h		conflict!
 0x00	00-1F	scsi/scsi_ioctl.h	conflict!
 0x00	00-1F	linux/fb.h		conflict!
@@ -290,6 +289,7 @@ Code  Seq#(hex)	Include File		Comments
 0x89	00-06	arch/x86/include/asm/sockios.h
 0x89	0B-DF	linux/sockios.h
 0x89	E0-EF	linux/sockios.h		SIOCPROTOPRIVATE range
+0x89	E0-EF	linux/dn.h		PROTOPRIVATE range
 0x89	F0-FF	linux/sockios.h		SIOCDEVPRIVATE range
 0x8B	all	linux/wireless.h
 0x8C	00-3F				WiNRADiO driver

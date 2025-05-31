@@ -32,7 +32,6 @@
     the provisions above, a recipient may use your version of this
     file under either the MPL or the GPL.
     
-======================================================================*/
 
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -144,6 +143,10 @@ static int parport_config(struct pcmcia_device *link)
     if (p == NULL) {
 	    pr_notice("parport_cs: parport_pc_probe_port() at 0x%3x, irq %u failed\n",
 		      (unsigned int)link->resource[0]->start, link->irq);
+	printk(KERN_NOTICE "parport_cs: parport_pc_probe_port() at "
+	       "0x%3x, irq %u failed\n",
+	       (unsigned int) link->resource[0]->start,
+	       link->irq);
 	goto failed;
     }
 

@@ -13,14 +13,12 @@ VIDIOC_ENUM_FMT - Enumerate image formats
 
 
 Synopsis
-========
 
 .. c:function:: int ioctl( int fd, VIDIOC_ENUM_FMT, struct v4l2_fmtdesc *argp )
     :name: VIDIOC_ENUM_FMT
 
 
 Arguments
-=========
 
 ``fd``
     File descriptor returned by :ref:`open() <func-open>`.
@@ -30,7 +28,6 @@ Arguments
 
 
 Description
-===========
 
 To enumerate image formats applications initialize the ``type`` and
 ``index`` field of struct :c:type:`v4l2_fmtdesc` and call
@@ -116,10 +113,16 @@ one until ``EINVAL`` is returned.
       - This format is not native to the device but emulated through
 	software (usually libv4l2), where possible try to use a native
 	format instead for better performance.
+    * - ``V4L2_FMT_FLAG_UNORDERED``
+      - 0x0004
+      - This format doesn't guarantee ordered buffer handling. I.e. the order
+	in which buffers are dequeued with
+	:ref:`VIDIOC_DQBUF <VIDIOC_QBUF>` may be different
+	from the order in which they were queued with
+	:ref:`VIDIOC_QBUF <VIDIOC_QBUF>`.
 
 
 Return Value
-============
 
 On success 0 is returned, on error -1 and the ``errno`` variable is set
 appropriately. The generic error codes are described at the

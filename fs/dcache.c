@@ -18,6 +18,7 @@
 #include <linux/string.h>
 #include <linux/mm.h>
 #include <linux/fs.h>
+#include <linux/fscrypt.h>
 #include <linux/fsnotify.h>
 #include <linux/slab.h>
 #include <linux/init.h>
@@ -32,6 +33,9 @@
 #include <linux/list_lru.h>
 #include "internal.h"
 #include "mount.h"
+#ifdef CONFIG_KDP_NS
+#include <linux/kdp.h>
+#endif
 
 /*
  * Usage:
@@ -257,24 +261,10 @@ static void __d_free(struct rcu_head *head)
 	kmem_cache_free(dentry_cache, dentry); 
 }
 
-static void __d_free_external_name(struct rcu_head *head)
-{
-	struct external_name *name = container_of(head, struct external_name,
-						  u.head);
-
-	mod_node_page_state(page_pgdat(virt_to_page(name)),
-			    NR_INDIRECTLY_RECLAIMABLE_BYTES,
-			    -ksize(name));
-
-	kfree(name);
-}
-
 static void __d_free_external(struct rcu_head *head)
 {
 	struct dentry *dentry = container_of(head, struct dentry, d_u.d_rcu);
-
-	__d_free_external_name(&external_name(dentry)->u.head);
-
+	kfree(external_name(dentry));
 	kmem_cache_free(dentry_cache, dentry);
 }
 
@@ -306,7 +296,7 @@ void release_dentry_name_snapshot(struct name_snapshot *name)
 		struct external_name *p;
 		p = container_of(name->name, struct external_name, name[0]);
 		if (unlikely(atomic_dec_and_test(&p->u.count)))
-			call_rcu(&p->u.head, __d_free_external_name);
+			kfree_rcu(p, u.head);
 	}
 }
 EXPORT_SYMBOL(release_dentry_name_snapshot);
@@ -727,12 +717,12 @@ static inline bool fast_dput(struct dentry *dentry)
 	 */
 	if (unlikely(ret < 0)) {
 		spin_lock(&dentry->d_lock);
-		if (WARN_ON_ONCE(dentry->d_lockref.count <= 0)) {
+		if (dentry->d_lockref.count > 1) {
+			dentry->d_lockref.count--;
 			spin_unlock(&dentry->d_lock);
 			return true;
 		}
-		dentry->d_lockref.count--;
-		goto locked;
+		return false;
 	}
 
 	/*
@@ -783,7 +773,6 @@ static inline bool fast_dput(struct dentry *dentry)
 	 * else could have killed it and marked it dead. Either way, we
 	 * don't need to do anything else.
 	 */
-locked:
 	if (dentry->d_lockref.count) {
 		spin_unlock(&dentry->d_lock);
 		return true;
@@ -1478,6 +1467,7 @@ void shrink_dcache_parent(struct dentry *parent)
 {
 	for (;;) {
 		struct select_data data;
+		bool need_sched = true;
 
 		INIT_LIST_HEAD(&data.dispose);
 		data.start = parent;
@@ -1490,9 +1480,18 @@ void shrink_dcache_parent(struct dentry *parent)
 			continue;
 		}
 
-		cond_resched();
+		if (cond_resched())
+			need_sched = false;
+
 		if (!data.found)
 			break;
+
+		if (unlikely(need_sched)) {
+			long prev_state = current->state;
+
+			if (!schedule_timeout_uninterruptible(1))
+				set_current_state(prev_state);
+		}
 	}
 }
 EXPORT_SYMBOL(shrink_dcache_parent);
@@ -1605,7 +1604,6 @@ EXPORT_SYMBOL(d_invalidate);
  
 struct dentry *__d_alloc(struct super_block *sb, const struct qstr *name)
 {
-	struct external_name *ext = NULL;
 	struct dentry *dentry;
 	char *dname;
 	int err;
@@ -1626,14 +1624,15 @@ struct dentry *__d_alloc(struct super_block *sb, const struct qstr *name)
 		dname = dentry->d_iname;
 	} else if (name->len > DNAME_INLINE_LEN-1) {
 		size_t size = offsetof(struct external_name, name[1]);
-
-		ext = kmalloc(size + name->len, GFP_KERNEL_ACCOUNT);
-		if (!ext) {
+		struct external_name *p = kmalloc(size + name->len,
+						  GFP_KERNEL_ACCOUNT |
+						  __GFP_RECLAIMABLE);
+		if (!p) {
 			kmem_cache_free(dentry_cache, dentry); 
 			return NULL;
 		}
-		atomic_set(&ext->u.count, 1);
-		dname = ext->name;
+		atomic_set(&p->u.count, 1);
+		dname = p->name;
 	} else  {
 		dname = dentry->d_iname;
 	}	
@@ -1670,12 +1669,6 @@ struct dentry *__d_alloc(struct super_block *sb, const struct qstr *name)
 			kmem_cache_free(dentry_cache, dentry);
 			return NULL;
 		}
-	}
-
-	if (unlikely(ext)) {
-		pg_data_t *pgdat = page_pgdat(virt_to_page(ext));
-		mod_node_page_state(pgdat, NR_INDIRECTLY_RECLAIMABLE_BYTES,
-				    ksize(ext));
 	}
 
 	this_cpu_inc(nr_dentry);
@@ -2710,21 +2703,7 @@ static void copy_name(struct dentry *dentry, struct dentry *target)
 		dentry->d_name.hash_len = target->d_name.hash_len;
 	}
 	if (old_name && likely(atomic_dec_and_test(&old_name->u.count)))
-		call_rcu(&old_name->u.head, __d_free_external_name);
-}
-
-/*
- * When d_splice_alias() moves a directory's encrypted alias to its decrypted
- * alias as a result of the encryption key being added, DCACHE_ENCRYPTED_NAME
- * must be cleared.  Note that we don't have to support arbitrary moves of this
- * flag because fscrypt doesn't allow encrypted aliases to be the source or
- * target of a rename().
- */
-static inline void fscrypt_handle_d_move(struct dentry *dentry)
-{
-#if IS_ENABLED(CONFIG_FS_ENCRYPTION)
-	dentry->d_flags &= ~DCACHE_ENCRYPTED_NAME;
-#endif
+		kfree_rcu(old_name, u.head);
 }
 
 /*
@@ -3003,25 +2982,28 @@ EXPORT_SYMBOL(d_splice_alias);
   
 bool is_subdir(struct dentry *new_dentry, struct dentry *old_dentry)
 {
-	bool subdir;
+	bool result;
 	unsigned seq;
 
 	if (new_dentry == old_dentry)
 		return true;
 
-	/* Access d_parent under rcu as d_move() may change it. */
-	rcu_read_lock();
-	seq = read_seqbegin(&rename_lock);
-	subdir = d_ancestor(old_dentry, new_dentry);
-	 /* Try lockless once... */
-	if (read_seqretry(&rename_lock, seq)) {
-		/* ...else acquire lock for progress even on deep chains. */
-		read_seqlock_excl(&rename_lock);
-		subdir = d_ancestor(old_dentry, new_dentry);
-		read_sequnlock_excl(&rename_lock);
-	}
-	rcu_read_unlock();
-	return subdir;
+	do {
+		/* for restarting inner loop in case of seq retry */
+		seq = read_seqbegin(&rename_lock);
+		/*
+		 * Need rcu_readlock to protect against the d_parent trashing
+		 * due to d_move
+		 */
+		rcu_read_lock();
+		if (d_ancestor(old_dentry, new_dentry))
+			result = true;
+		else
+			result = false;
+		rcu_read_unlock();
+	} while (read_seqretry(&rename_lock, seq));
+
+	return result;
 }
 EXPORT_SYMBOL(is_subdir);
 
@@ -3130,11 +3112,13 @@ void __init vfs_caches_init_early(void)
 {
 	int i;
 
+	set_memsize_kernel_type(MEMSIZE_KERNEL_VFSHASH);
 	for (i = 0; i < ARRAY_SIZE(in_lookup_hashtable); i++)
 		INIT_HLIST_BL_HEAD(&in_lookup_hashtable[i]);
 
 	dcache_init_early();
 	inode_init_early();
+	set_memsize_kernel_type(MEMSIZE_KERNEL_OTHERS);
 }
 
 void __init vfs_caches_init(void)
@@ -3149,4 +3133,7 @@ void __init vfs_caches_init(void)
 	mnt_init();
 	bdev_cache_init();
 	chrdev_init();
+#ifdef CONFIG_KDP_NS
+	ns_protect = 1;
+#endif
 }

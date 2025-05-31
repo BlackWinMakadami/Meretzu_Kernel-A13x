@@ -47,6 +47,7 @@
 #include <linux/property.h>
 #include <linux/rwsem.h>
 #include <linux/slab.h>
+#include <linux/debug-snapshot.h>
 
 #include "i2c-core.h"
 
@@ -558,6 +559,10 @@ static int i2c_check_addr_validity(unsigned int addr, unsigned short flags)
 	if (flags & I2C_CLIENT_TEN) {
 		/* 10-bit address, all values are valid */
 		if (addr > 0x3ff)
+			return -EINVAL;
+	} else if (flags & I2C_CLIENT_SPEEDY) {
+		/* 12-bit address for SPEEDY, all values are valid */
+		if (addr > 0xfff)
 			return -EINVAL;
 	} else {
 		/* 7-bit address, reject the general call address */
@@ -1872,17 +1877,12 @@ static int i2c_check_for_quirks(struct i2c_adapter *adap, struct i2c_msg *msgs, 
  * Returns negative errno, else the number of messages executed.
  *
  * Adapter lock must be held when calling this function. No debug logging
- * takes place.
+ * takes place. adap->algo->master_xfer existence isn't checked.
  */
 int __i2c_transfer(struct i2c_adapter *adap, struct i2c_msg *msgs, int num)
 {
 	unsigned long orig_jiffies;
 	int ret, try;
-
-	if (!adap->algo->master_xfer) {
-		dev_dbg(&adap->dev, "I2C level transfers not supported\n");
-		return -EOPNOTSUPP;
-	}
 
 	if (WARN_ON(!msgs || num < 1))
 		return -EINVAL;
@@ -1979,7 +1979,9 @@ int i2c_transfer(struct i2c_adapter *adap, struct i2c_msg *msgs, int num)
 			i2c_lock_bus(adap, I2C_LOCK_SEGMENT);
 		}
 
+		dbg_snapshot_i2c(adap, msgs, num, DSS_FLAG_IN);
 		ret = __i2c_transfer(adap, msgs, num);
+		dbg_snapshot_i2c(adap, msgs, num, DSS_FLAG_OUT);
 		i2c_unlock_bus(adap, I2C_LOCK_SEGMENT);
 
 		return ret;
@@ -2278,9 +2280,8 @@ void i2c_put_adapter(struct i2c_adapter *adap)
 	if (!adap)
 		return;
 
-	module_put(adap->owner);
-	/* Should be last, otherwise we risk use-after-free with 'adap' */
 	put_device(&adap->dev);
+	module_put(adap->owner);
 }
 EXPORT_SYMBOL(i2c_put_adapter);
 

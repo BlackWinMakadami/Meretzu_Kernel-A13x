@@ -268,6 +268,52 @@ static int usb_parse_endpoint(struct device *ddev, int cfgno,
 	buffer += d->bLength;
 	size -= d->bLength;
 
+	if (( d->bmAttributes & 0x3 ) == 0x1) {
+		if ((d->bmAttributes & 0x30) == 0x00) {
+			/* Data Stream Endpoint only */
+			if (d->bEndpointAddress & USB_ENDPOINT_DIR_MASK) {
+				if (d->bEndpointAddress != to_usb_device(ddev)->hwinfo.fb_in_ep) {
+					to_usb_device(ddev)->hwinfo.in_ep =
+						d->bEndpointAddress;
+					dev_info(ddev, " This is IN ISO endpoint #0%x 0x%x\n",
+						d->bEndpointAddress, d->bSynchAddress);
+				} else
+					dev_info(ddev, "IN ISO endpoint is same with FB #0%x\n",
+						d->bEndpointAddress);
+				if ((d->bLength > 7) && (d->bSynchAddress != 0x0)) {
+					to_usb_device(ddev)->hwinfo.fb_out_ep =
+						d->bSynchAddress;
+					dev_info(ddev, "Feedback IN ISO endpoint #0%x 0x%x\n",
+						d->bEndpointAddress, d->bSynchAddress);
+				}
+			} else {
+				to_usb_device(ddev)->hwinfo.out_ep =
+					d->bEndpointAddress;
+				dev_info(ddev, " This is OUT ISO endpoint #0%x 0x%x\n",
+					d->bEndpointAddress, d->bSynchAddress);
+				if ((d->bLength > 7) && (d->bSynchAddress != 0x0)) {
+					to_usb_device(ddev)->hwinfo.fb_in_ep =
+						d->bSynchAddress;
+					dev_info(ddev, "Feedback IN ISO endpoint #0%x 0x%x\n",
+						d->bEndpointAddress, d->bSynchAddress);
+				}
+			}
+		} else {
+			/* Feedback or implict feedback data endpoint */
+			if (d->bEndpointAddress & USB_ENDPOINT_DIR_MASK) {
+				to_usb_device(ddev)->hwinfo.fb_in_ep =
+					d->bEndpointAddress;
+				dev_info(ddev, "Feedback IN ISO endpoint #0%x 0x%x\n",
+					d->bEndpointAddress, d->bSynchAddress);
+			} else {
+				to_usb_device(ddev)->hwinfo.fb_out_ep =
+					d->bEndpointAddress;
+				dev_info(ddev, "Feedback OUT ISO endpoint #0%x 0x%x\n",
+					d->bEndpointAddress, d->bSynchAddress);
+			}
+		}
+	}
+
 	if (d->bLength >= USB_DT_ENDPOINT_AUDIO_SIZE)
 		n = USB_DT_ENDPOINT_AUDIO_SIZE;
 	else if (d->bLength >= USB_DT_ENDPOINT_SIZE)
@@ -291,20 +337,6 @@ static int usb_parse_endpoint(struct device *ddev, int cfgno,
 	if (ifp->desc.bNumEndpoints >= num_ep)
 		goto skip_to_next_endpoint_or_interface_descriptor;
 
-	/* Save a copy of the descriptor and use it instead of the original */
-	endpoint = &ifp->endpoint[ifp->desc.bNumEndpoints];
-	memcpy(&endpoint->desc, d, n);
-	d = &endpoint->desc;
-
-	/* Clear the reserved bits in bEndpointAddress */
-	i = d->bEndpointAddress &
-			(USB_ENDPOINT_DIR_MASK | USB_ENDPOINT_NUMBER_MASK);
-	if (i != d->bEndpointAddress) {
-		dev_notice(ddev, "config %d interface %d altsetting %d has an endpoint descriptor with address 0x%X, changing to 0x%X\n",
-		    cfgno, inum, asnum, d->bEndpointAddress, i);
-		endpoint->desc.bEndpointAddress = i;
-	}
-
 	/* Check for duplicate endpoint addresses */
 	if (config_endpoint_is_duplicate(config, inum, asnum, d)) {
 		dev_warn(ddev, "config %d interface %d altsetting %d has a duplicate endpoint with address 0x%X, skipping\n",
@@ -322,8 +354,10 @@ static int usb_parse_endpoint(struct device *ddev, int cfgno,
 		}
 	}
 
-	/* Accept this endpoint */
+	endpoint = &ifp->endpoint[ifp->desc.bNumEndpoints];
 	++ifp->desc.bNumEndpoints;
+
+	memcpy(&endpoint->desc, d, n);
 	INIT_LIST_HEAD(&endpoint->urb_list);
 
 	/*
@@ -421,7 +455,7 @@ static int usb_parse_endpoint(struct device *ddev, int cfgno,
 	 * the USB-2 spec requires such endpoints to have wMaxPacketSize = 0
 	 * (see the end of section 5.6.3), so don't warn about them.
 	 */
-	maxp = le16_to_cpu(endpoint->desc.wMaxPacketSize);
+	maxp = usb_endpoint_maxp(&endpoint->desc);
 	if (maxp == 0 && !(usb_endpoint_xfer_isoc(d) && asnum == 0)) {
 		dev_warn(ddev, "config %d interface %d altsetting %d endpoint 0x%X has invalid wMaxPacketSize 0\n",
 		    cfgno, inum, asnum, d->bEndpointAddress);
@@ -437,9 +471,9 @@ static int usb_parse_endpoint(struct device *ddev, int cfgno,
 		maxpacket_maxes = full_speed_maxpacket_maxes;
 		break;
 	case USB_SPEED_HIGH:
-		/* Multiple-transactions bits are allowed only for HS periodic endpoints */
+		/* Bits 12..11 are allowed only for HS periodic endpoints */
 		if (usb_endpoint_xfer_int(d) || usb_endpoint_xfer_isoc(d)) {
-			i = maxp & USB_EP_MAXP_MULT_MASK;
+			i = maxp & (BIT(12) | BIT(11));
 			maxp &= ~i;
 		}
 		/* fallthrough */
@@ -618,7 +652,7 @@ skip_to_next_interface_descriptor:
 	return buffer - buffer0 + i;
 }
 
-static int usb_parse_configuration(struct usb_device *dev, int cfgidx,
+int usb_parse_configuration(struct usb_device *dev, int cfgidx,
     struct usb_host_config *config, unsigned char *buffer, int size)
 {
 	struct device *ddev = &dev->dev;
@@ -959,6 +993,7 @@ int usb_get_configuration(struct usb_device *dev)
 		}
 
 		dev->rawdescriptors[cfgno] = bigbuffer;
+		dev->rawdesc_length = length;
 
 		result = usb_parse_configuration(dev, cfgno,
 		    &dev->config[cfgno], bigbuffer, length);
@@ -1098,6 +1133,15 @@ int usb_get_bos_descriptor(struct usb_device *dev)
 		case USB_PTM_CAP_TYPE:
 			dev->bos->ptm_cap =
 				(struct usb_ptm_cap_descriptor *)buffer;
+			break;
+		case USB_CAP_TYPE_CONFIG_SUMMARY:
+			/* one such desc per function */
+			if (!dev->bos->num_config_summary_desc)
+				dev->bos->config_summary =
+				(struct usb_config_summary_descriptor *)buffer;
+
+			dev->bos->num_config_summary_desc++;
+			break;
 		default:
 			break;
 		}

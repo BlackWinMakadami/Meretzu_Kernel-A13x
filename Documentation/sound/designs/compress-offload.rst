@@ -1,6 +1,4 @@
-=========================
 ALSA Compress-Offload API
-=========================
 
 Pierre-Louis.Bossart <pierre-louis.bossart@linux.intel.com>
 
@@ -8,7 +6,6 @@ Vinod Koul <vinod.koul@linux.intel.com>
 
 
 Overview
-========
 Since its early days, the ALSA API was defined with PCM support or
 constant bitrates payloads such as IEC61937 in mind. Arguments and
 returned values in frames are the norm, making it a challenge to
@@ -33,7 +30,6 @@ usable by others.
 
 
 Requirements
-============
 The main requirements are:
 
 - separation between byte counts and time. Compressed formats may have
@@ -153,7 +149,6 @@ Modifications include:
 
 
 Gapless Playback
-================
 When playing thru an album, the decoders have the ability to skip the encoder
 delay and padding and directly move from one track content to another. The end
 user can perceive this as gapless playback as we don't have silence while
@@ -183,6 +178,11 @@ partial drain
   EOF is reached and now DSP can start skipping padding delay. Also next write
   data would belong to next track
 
+- set_next_track_param
+This routine is called to send to DSP codec specific data of subsequent track
+in gapless before first write.
+
+
 Sequence flow for gapless would be:
 - Open
 - Get caps / codec caps
@@ -194,6 +194,7 @@ Sequence flow for gapless would be:
 - Indicate next track data by sending set_next_track
 - Set metadata of the next track
 - then call partial_drain to flush most of buffer in DSP
+- set codec specific data of subsequent track
 - Fill data of the next track
 - DSP switches to second track
 
@@ -201,7 +202,6 @@ Sequence flow for gapless would be:
 
 
 Not supported
-=============
 - Support for VoIP/circuit-switched calls is not the target of this
   API. Support for dynamic bit-rate changes would require a tight
   coupling between the DSP and the host stack, limiting power savings.
@@ -236,7 +236,6 @@ Not supported
 
 
 Credits
-=======
 - Mark Brown and Liam Girdwood for discussions on the need for this API
 - Harsha Priya for her work on intel_sst compressed API
 - Rakesh Ughreja for valuable feedback

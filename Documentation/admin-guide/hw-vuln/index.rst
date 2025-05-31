@@ -1,6 +1,4 @@
-========================
 Hardware vulnerabilities
-========================
 
 This section describes CPU vulnerabilities and provides an overview of the
 possible mitigations along with guidance for selecting mitigations if they

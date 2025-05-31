@@ -26,7 +26,6 @@
 
   Jochen Schaeuble <psionic@psionic.de>
 
-======================================================================*/
 
 
 #include <linux/module.h>
@@ -300,7 +299,6 @@ static int __init init_slram(void)
 		T("slram: devstart = %s\n", devstart);
 		if ((!map) || (!(devlength = strsep(&map, ",")))) {
 			E("slram: No devicelength / -end specified.\n");
-			break;
 		}
 		T("slram: devlength = %s\n", devlength);
 		if (parse_cmdline(devname, devstart, devlength) != 0) {

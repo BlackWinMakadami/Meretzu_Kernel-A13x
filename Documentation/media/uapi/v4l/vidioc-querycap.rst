@@ -13,14 +13,12 @@ VIDIOC_QUERYCAP - Query device capabilities
 
 
 Synopsis
-========
 
 .. c:function:: int ioctl( int fd, VIDIOC_QUERYCAP, struct v4l2_capability *argp )
     :name: VIDIOC_QUERYCAP
 
 
 Arguments
-=========
 
 ``fd``
     File descriptor returned by :ref:`open() <func-open>`.
@@ -30,7 +28,6 @@ Arguments
 
 
 Description
-===========
 
 All V4L2 devices support the ``VIDIOC_QUERYCAP`` ioctl. It is used to
 identify kernel devices compatible with this specification and to obtain
@@ -254,6 +251,9 @@ specification the ioctl returns an ``EINVAL`` error code.
     * - ``V4L2_CAP_TOUCH``
       - 0x10000000
       - This is a touch device.
+    * - ``V4L2_CAP_FENCES``
+      - 0x20000000
+      - The device support explicit synchronization.
     * - ``V4L2_CAP_DEVICE_CAPS``
       - 0x80000000
       - The driver fills the ``device_caps`` field. This capability can
@@ -262,7 +262,6 @@ specification the ioctl returns an ``EINVAL`` error code.
 
 
 Return Value
-============
 
 On success 0 is returned, on error -1 and the ``errno`` variable is set
 appropriately. The generic error codes are described at the

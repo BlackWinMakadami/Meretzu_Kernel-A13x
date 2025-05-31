@@ -226,9 +226,7 @@ class PrinterRST(Printer):
 .. (helpers description), and from scripts/bpf_helpers_doc.py in the same
 .. repository (header and footer).
 
-===========
 BPF-HELPERS
-===========
 -------------------------------------------------------------------------------
 list of eBPF helper functions
 -------------------------------------------------------------------------------
@@ -236,7 +234,6 @@ list of eBPF helper functions
 :Manual section: 7
 
 DESCRIPTION
-===========
 
 The extended Berkeley Packet Filter (eBPF) subsystem consists in programs
 written in a pseudo-assembly language, then attached to one of the several
@@ -264,14 +261,12 @@ developers. They are sorted by chronological order (the oldest helpers in the
 kernel at the top).
 
 HELPERS
-=======
 '''
         print(header)
 
     def print_footer(self):
         footer = '''
 EXAMPLES
-========
 
 Example usage for most of the eBPF helpers listed in this manual page are
 available within the Linux kernel sources, at the following locations:
@@ -280,13 +275,13 @@ available within the Linux kernel sources, at the following locations:
 * *tools/testing/selftests/bpf/*
 
 LICENSE
-=======
 
 eBPF programs can have an associated license, passed along with the bytecode
 instructions to the kernel when the programs are loaded. The format for that
 string is identical to the one in use for kernel modules (Dual licenses, such
 as "Dual BSD/GPL", may be used). Some helper functions are only accessible to
 programs that are compatible with the GNU General Public License (GNU GPL).
+programs that are compatible with the GNU Privacy License (GPL).
 
 In order to use such helpers, the eBPF program must be loaded with the correct
 license string passed (via **attr**) to the **bpf**\ () system call, and this
@@ -298,7 +293,6 @@ similar to the following:
 	char ____license[] __attribute__((section("license"), used)) = "GPL";
 
 IMPLEMENTATION
-==============
 
 This manual page is an effort to document the existing eBPF helper functions.
 But as of this writing, the BPF sub-system is under heavy development. New eBPF
@@ -337,7 +331,6 @@ pointers for network processing are listed in function
 **bpf_helper_changes_pkt_data**\ () in file *net/core/filter.c*.
 
 SEE ALSO
-========
 
 **bpf**\ (2),
 **cgroups**\ (7),
@@ -553,8 +546,6 @@ Parse eBPF header file and generate documentation for eBPF helper functions.
 The RST-formatted output produced can be turned into a manual page with the
 rst2man utility.
 """)
-argParser.add_argument('--header', action='store_true',
-                       help='generate C header file')
 if (os.path.isfile(bpfh)):
     argParser.add_argument('--filename', help='path to include/uapi/linux/bpf.h',
                            default=bpfh)
@@ -567,8 +558,5 @@ headerParser = HeaderParser(args.filename)
 headerParser.run()
 
 # Print formatted output to standard output.
-if args.header:
-    printer = PrinterHelpers(headerParser.helpers)
-else:
-    printer = PrinterRST(headerParser.helpers)
+printer = PrinterRST(headerParser.helpers)
 printer.print_all()

@@ -298,6 +298,18 @@ static inline bool ipv6_is_mld(struct sk_buff *skb, int nexthdr, int offset)
 void addrconf_prefix_rcv(struct net_device *dev,
 			 u8 *opt, int len, bool sllao);
 
+/* Determines into what table to put autoconf PIO/RIO/default routes
+ * learned on this device.
+ *
+ * - If 0, use the same table for every device. This puts routes into
+ *   one of RT_TABLE_{PREFIX,INFO,DFLT} depending on the type of route
+ *   (but note that these three are currently all equal to
+ *   RT6_TABLE_MAIN).
+ * - If > 0, use the specified table.
+ * - If < 0, put routes into table dev->ifindex + (-rt_table).
+ */
+u32 addrconf_rt_table(const struct net_device *dev, u32 default_table);
+
 /*
  *	anycast prototypes (anycast.c)
  */
@@ -338,22 +350,6 @@ void inet6_netconf_notify_devconf(struct net *net, int event, int type,
 static inline struct inet6_dev *__in6_dev_get(const struct net_device *dev)
 {
 	return rcu_dereference_rtnl(dev->ip6_ptr);
-}
-
-/**
- * __in6_dev_stats_get - get inet6_dev pointer for stats
- * @dev: network device
- * @skb: skb for original incoming interface if neeeded
- *
- * Caller must hold rcu_read_lock or RTNL, because this function
- * does not take a reference on the inet6_dev.
- */
-static inline struct inet6_dev *__in6_dev_stats_get(const struct net_device *dev,
-						    const struct sk_buff *skb)
-{
-	if (netif_is_l3_master(dev))
-		dev = dev_get_by_index_rcu(dev_net(dev), inet6_iif(skb));
-	return __in6_dev_get(dev);
 }
 
 /**
@@ -443,10 +439,6 @@ static inline void in6_ifa_hold(struct inet6_ifaddr *ifp)
 	refcount_inc(&ifp->refcnt);
 }
 
-static inline bool in6_ifa_hold_safe(struct inet6_ifaddr *ifp)
-{
-	return refcount_inc_not_zero(&ifp->refcnt);
-}
 
 /*
  *	compute link-local solicited-node multicast address

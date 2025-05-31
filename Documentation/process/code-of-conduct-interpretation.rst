@@ -1,7 +1,6 @@
 .. _code_of_conduct_interpretation:
 
 Linux Kernel Contributor Covenant Code of Conduct Interpretation
-================================================================
 
 The :ref:`code_of_conduct` is a general document meant to
 provide a set of rules for almost any open source community.  Every
@@ -52,6 +51,7 @@ uncertain how to handle situations that come up.  It will not be
 considered a violation report unless you want it to be.  If you are
 uncertain about approaching the TAB or any other maintainers, please
 reach out to our conflict mediator, Joanna Lee <jlee@linuxfoundation.org>.
+reach out to our conflict mediator, Mishi Choudhary <mishi@linux.com>.
 
 In the end, "be kind to each other" is really what the end goal is for
 everybody.  We know everyone is human and we all fail at times, but the

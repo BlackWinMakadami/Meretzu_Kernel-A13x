@@ -39,6 +39,29 @@
 
 #include "internal.h"
 
+atomic_long_t nr_vmalloc_pages;
+
+static int vmalloc_size_notifier(struct notifier_block *nb,
+					unsigned long action, void *data)
+{
+	struct seq_file *s;
+
+	s = (struct seq_file *)data;
+	if (s != NULL)
+		seq_printf(s, "VmallocAPIsize: %8lu kB\n",
+			   atomic_long_read(&nr_vmalloc_pages)
+				 << (PAGE_SHIFT - 10));
+	else
+		pr_cont("VmallocAPIsize:%lukB ",
+			atomic_long_read(&nr_vmalloc_pages)
+				<< (PAGE_SHIFT - 10));
+	return 0;
+}
+
+static struct notifier_block vmalloc_size_nb = {
+	.notifier_call = vmalloc_size_notifier,
+};
+
 struct vfree_deferred {
 	struct llist_head list;
 	struct work_struct wq;
@@ -141,8 +164,14 @@ static int vmap_pte_range(pmd_t *pmd, unsigned long addr,
 	 * nr is a running index into the array which helps higher level
 	 * callers keep track of where we're up to.
 	 */
-
+#ifdef CONFIG_RKP
+	unsigned long paddr = addr;
+	if (pgprot_rkp_ro(prot))
+		paddr &= (~PTE_RKP_RO);
+	pte = pte_alloc_kernel(pmd, paddr);
+#else
 	pte = pte_alloc_kernel(pmd, addr);
+#endif
 	if (!pte)
 		return -ENOMEM;
 	do {
@@ -340,6 +369,11 @@ static unsigned long cached_vstart;
 static unsigned long cached_align;
 
 static unsigned long vmap_area_pcpu_hole;
+
+unsigned long vmalloc_nr_pages(void)
+{
+	return atomic_long_read(&nr_vmalloc_pages);
+}
 
 static struct vmap_area *__find_vmap_area(unsigned long addr)
 {
@@ -1440,6 +1474,7 @@ struct vm_struct *get_vm_area(unsigned long size, unsigned long flags)
 				  NUMA_NO_NODE, GFP_KERNEL,
 				  __builtin_return_address(0));
 }
+EXPORT_SYMBOL_GPL(get_vm_area);
 
 struct vm_struct *get_vm_area_caller(unsigned long size, unsigned long flags,
 				const void *caller)
@@ -1530,6 +1565,7 @@ static void __vunmap(const void *addr, int deallocate_pages)
 			BUG_ON(!page);
 			__free_pages(page, 0);
 		}
+		atomic_long_sub(area->nr_pages, &nr_vmalloc_pages);
 
 		kvfree(area->pages);
 	}
@@ -1697,6 +1733,7 @@ static void *__vmalloc_area_node(struct vm_struct *area, gfp_t gfp_mask,
 		if (unlikely(!page)) {
 			/* Successfully allocated i pages, free them in __vunmap() */
 			area->nr_pages = i;
+			atomic_long_add(area->nr_pages, &nr_vmalloc_pages);
 			goto fail;
 		}
 		area->pages[i] = page;
@@ -1704,6 +1741,7 @@ static void *__vmalloc_area_node(struct vm_struct *area, gfp_t gfp_mask,
 			cond_resched();
 	}
 
+	atomic_long_add(area->nr_pages, &nr_vmalloc_pages);
 	if (map_vm_area(area, prot, pages))
 		goto fail;
 	return area->addr;
@@ -2770,6 +2808,9 @@ static int __init proc_vmalloc_init(void)
 				nr_node_ids * sizeof(unsigned int), NULL);
 	else
 		proc_create_seq("vmallocinfo", 0400, NULL, &vmalloc_op);
+
+	atomic_long_set(&nr_vmalloc_pages, 0);
+	show_mem_extra_notifier_register(&vmalloc_size_nb);
 	return 0;
 }
 module_init(proc_vmalloc_init);

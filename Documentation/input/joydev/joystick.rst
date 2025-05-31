@@ -3,7 +3,6 @@
 .. _joystick-doc:
 
 Introduction
-============
 
 The joystick driver for Linux provides support for a variety of joysticks
 and similar devices. It is based on a larger project aiming to support all
@@ -134,7 +133,6 @@ This way, after the next reboot your joystick will remain calibrated. You
 can also add the ``jscal -p`` line to your shutdown script.
 
 HW specific driver information
-==============================
 
 In this section each of the separate hardware specific drivers is described.
 
@@ -552,7 +550,6 @@ serial port to the driver using::
 where x is the number of the serial port.
 
 Troubleshooting
-===============
 
 There is quite a high probability that you run into some problems. For
 testing whether the driver works, if in doubt, use the jstest utility in

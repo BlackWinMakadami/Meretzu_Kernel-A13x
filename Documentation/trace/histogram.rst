@@ -1,11 +1,8 @@
-================
 Event Histograms
-================
 
 Documentation written by Tom Zanussi
 
 1. Introduction
-===============
 
   Histogram triggers are special event triggers that can be used to
   aggregate trace event data into histograms.  For information on
@@ -13,7 +10,6 @@ Documentation written by Tom Zanussi
 
 
 2. Histogram Trigger Command
-============================
 
   A histogram trigger command is an event trigger command that
   aggregates event hits into a hash table keyed on one or more trace
@@ -40,6 +36,7 @@ Documentation written by Tom Zanussi
   'keys' or 'key' can be used to specify keys, and the keywords
   'values', 'vals', or 'val' can be used to specify values.  Compound
   keys consisting of up to three fields can be specified by the 'keys'
+  keys consisting of up to two fields can be specified by the 'keys'
   keyword.  Hashing a compound key produces a unique entry in the
   table for each unique combination of component keys, and can be
   useful for providing more fine-grained summaries of event data.
@@ -191,7 +188,7 @@ Documentation written by Tom Zanussi
                                 with the event, in nanoseconds.  May be
 			        modified by .usecs to have timestamps
 			        interpreted as microseconds.
-    common_cpu             int  the cpu on which the event occurred.
+    cpu                    int  the cpu on which the event occurred.
     ====================== ==== =======================================
 
 Extended error information

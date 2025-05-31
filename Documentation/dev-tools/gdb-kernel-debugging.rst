@@ -1,7 +1,6 @@
 .. highlight:: none
 
 Debugging kernel and modules via gdb
-====================================
 
 The kernel debugger kgdb, hypervisors like QEMU or JTAG-based hardware
 interfaces allow to debug the Linux kernel and its modules during runtime

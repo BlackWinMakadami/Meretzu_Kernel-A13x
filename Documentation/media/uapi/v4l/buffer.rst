@@ -35,7 +35,6 @@ buffer.
 
 
 Interactions between formats, controls and buffers
-==================================================
 
 V4L2 exposes parameters that influence the buffer size, or the way data is
 laid out in the buffer. Those parameters are exposed through both formats and
@@ -156,7 +155,6 @@ of appropriately sized buffers for each use case).
 .. c:type:: v4l2_buffer
 
 struct v4l2_buffer
-==================
 
 .. tabularcolumns:: |p{2.8cm}|p{2.5cm}|p{1.3cm}|p{10.5cm}|
 
@@ -305,6 +303,22 @@ struct v4l2_buffer
       -
       - A place holder for future extensions. Drivers and applications
 	must set this to 0.
+      - ``fence_fd``
+      -
+      - Used to communicate fences file descriptors from userspace to kernel
+	and vice-versa. On :ref:`VIDIOC_QBUF <VIDIOC_QBUF>` when sending
+	an in-fence for V4L2 to wait on, the ``V4L2_BUF_FLAG_IN_FENCE`` flag must
+	be used and this field set to the fence file descriptor of the in-fence
+	If the in-fence is not valid ` VIDIOC_QBUF`` returns an error.
+
+        To get an out-fence back from V4L2 the ``V4L2_BUF_FLAG_OUT_FENCE``
+	must be set, the kernel will return the out-fence file descriptor on
+	this field. If it fails to create the out-fence ``VIDIOC_QBUF` returns
+        an error.
+
+	In all other ioctls V4L2 sets this field to -1 if
+	``V4L2_BUF_FLAG_IN_FENCE`` and/or ``V4L2_BUF_FLAG_OUT_FENCE`` are set,
+	otherwise this field is set to 0 for backward compatibility.
     * - __u32
       - ``reserved``
       -
@@ -316,7 +330,6 @@ struct v4l2_buffer
 .. c:type:: v4l2_plane
 
 struct v4l2_plane
-=================
 
 .. tabularcolumns:: |p{3.5cm}|p{3.5cm}|p{3.5cm}|p{7.0cm}|
 
@@ -397,7 +410,6 @@ struct v4l2_plane
 .. c:type:: v4l2_buf_type
 
 enum v4l2_buf_type
-==================
 
 .. cssclass:: longtable
 
@@ -458,7 +470,6 @@ enum v4l2_buf_type
 .. _buffer-flags:
 
 Buffer Flags
-============
 
 .. tabularcolumns:: |p{7.0cm}|p{2.2cm}|p{8.3cm}|
 
@@ -648,13 +659,39 @@ Buffer Flags
       - Start Of Exposure. The buffer timestamp has been taken when the
 	exposure of the frame has begun. This is only valid for the
 	``V4L2_BUF_TYPE_VIDEO_CAPTURE`` buffer type.
+    * .. _`V4L2-BUF-FLAG-IN-FENCE`:
+
+      - ``V4L2_BUF_FLAG_IN_FENCE``
+      - 0x00200000
+      - Ask V4L2 to wait on the fence passed in the ``fence_fd`` field. The
+	buffer won't be queued to the driver until the fence signals. The order
+	in which buffers are queued is guaranteed to be preserved, so any
+	buffers queued after this buffer will also be blocked until this fence
+	signals. This flag must be set before calling ``VIDIOC_QBUF``. For
+	other ioctls the driver just report the value of the flag.
+
+        If the fence signals the flag is cleared and not reported anymore.
+	If the fence is not valid ``VIDIOC_QBUF`` returns an error.
+
+
+    * .. _`V4L2-BUF-FLAG-OUT-FENCE`:
+
+      - ``V4L2_BUF_FLAG_OUT_FENCE``
+      - 0x00400000
+      - Request for a fence to be attached to the buffer. The driver will fill
+	in the out-fence fd in the ``fence_fd`` field when :ref:`VIDIOC_QBUF
+	<VIDIOC_QBUF>` returns. This flag must be set before calling
+	``VIDIOC_QBUF``. For other ioctls the driver just report the value of
+	the flag.
+
+        If the creation of the  out-fence  fails ``VIDIOC_QBUF`` returns an
+	error.
 
 
 
 .. c:type:: v4l2_memory
 
 enum v4l2_memory
-================
 
 .. tabularcolumns:: |p{6.6cm}|p{2.2cm}|p{8.7cm}|
 
@@ -679,7 +716,6 @@ enum v4l2_memory
 
 
 Timecodes
-=========
 
 The struct :c:type:`v4l2_timecode` structure is designed to hold a
 :ref:`smpte12m` or similar timecode. (struct

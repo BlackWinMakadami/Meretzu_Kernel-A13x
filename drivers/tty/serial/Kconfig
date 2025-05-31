@@ -260,7 +260,7 @@ config SERIAL_SAMSUNG_UARTS
 	int
 	depends on SERIAL_SAMSUNG
 	default 4 if SERIAL_SAMSUNG_UARTS_4 || CPU_S3C2416
-	default 3
+	default 10
 	help
 	  Select the number of available UART ports for the Samsung S3C
 	  serial driver
@@ -289,6 +289,23 @@ config SERIAL_SAMSUNG_CONSOLE
 	  "console=ttySACx". (Try "man bootparam" or see the documentation of
 	  your boot loader about how to pass options to the kernel at
 	  boot time.)
+
+config S3C_LOWLEVEL_UART_PORT
+	int "S3C UART to use for low-level messages"
+	default 0
+	help
+	  Choice of which UART port to use for the low-level messages,
+	  such as the `Uncompressing...` at start time. The value of
+	  this configuration should be between zero and two. The port
+	  must have been initialised by the boot-loader before use.
+
+config SERIAL_SAMSUNG_HWACG
+	bool "HWACG(HW Auto Clock Gating) support for Samsung UART port"
+	default y
+	help
+	  If HWACG is enabled on UART, System power mode will goes into
+	  suspend state only when UART UCON Tx, Rx bit was disabled.
+	  To support HWACG on UART, this configuration should be selected.
 
 config SERIAL_SIRFSOC
         tristate "SiRF SoC Platform Serial port support"
@@ -989,6 +1006,21 @@ config SERIAL_MSM_CONSOLE
 	depends on SERIAL_MSM=y
 	select SERIAL_CORE_CONSOLE
 	select SERIAL_EARLYCON
+
+config SERIAL_MSM_GENI_HALF_SAMPLING
+	bool "Changes clock divider which impacts sampling rate for QUP HW ver greater than 2.5.0"
+	help
+	  Clock divider value should be doubled for QUP hardware version
+	  greater than 2.5.0.
+	  As earlycon can't have HW version awareness, decision is taken
+	  based on the configuration.
+
+config SERIAL_MSM_GENI_EARLY_CONSOLE
+	bool "MSM on-chip GENI HW based early console support"
+	select SERIAL_MSM_GENI_HALF_SAMPLING
+	help
+	  Serial early console driver for Qualcomm Technologies Inc's GENI
+	  based QUP hardware.
 
 config SERIAL_QCOM_GENI
 	tristate "QCOM on-chip GENI based serial port support"

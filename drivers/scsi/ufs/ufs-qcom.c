@@ -910,11 +910,8 @@ static void ufs_qcom_dev_ref_clk_ctrl(struct ufs_qcom_host *host, bool enable)
 
 		writel_relaxed(temp, host->dev_ref_clk_ctrl_mmio);
 
-		/*
-		 * Make sure the write to ref_clk reaches the destination and
-		 * not stored in a Write Buffer (WB).
-		 */
-		readl(host->dev_ref_clk_ctrl_mmio);
+		/* ensure that ref_clk is enabled/disabled before we return */
+		wmb();
 
 		/*
 		 * If we call hibern8 exit after this, we need to make sure that
@@ -1101,6 +1098,13 @@ static void ufs_qcom_advertise_quirks(struct ufs_hba *hba)
 				| UFSHCD_QUIRK_DME_PEER_ACCESS_AUTO_MODE
 				| UFSHCD_QUIRK_BROKEN_PA_RXHSUNTERMCAP);
 	}
+
+	/*
+	 * Inline crypto is currently broken with ufs-qcom at least because the
+	 * device tree doesn't include the crypto registers.  There are likely
+	 * to be other issues that will need to be addressed too.
+	 */
+	hba->quirks |= UFSHCD_QUIRK_BROKEN_CRYPTO;
 }
 
 static void ufs_qcom_set_caps(struct ufs_hba *hba)

@@ -677,12 +677,7 @@ static int begin_cmd(struct send_ctx *sctx, int cmd)
 	if (WARN_ON(!sctx->send_buf))
 		return -EINVAL;
 
-	if (unlikely(sctx->send_size != 0)) {
-		btrfs_err(sctx->send_root->fs_info,
-			  "send: command header buffer not empty cmd %d offset %llu",
-			  cmd, sctx->send_off);
-		return -EINVAL;
-	}
+	BUG_ON(sctx->send_size);
 
 	sctx->send_size += sizeof(*hdr);
 	hdr = (struct btrfs_cmd_header *)sctx->send_buf;
@@ -963,15 +958,7 @@ static int iterate_inode_ref(struct btrfs_root *root, struct btrfs_path *path,
 					ret = PTR_ERR(start);
 					goto out;
 				}
-				if (unlikely(start < p->buf)) {
-					btrfs_err(root->fs_info,
-			"send: path ref buffer underflow for key (%llu %u %llu)",
-						  found_key->objectid,
-						  found_key->type,
-						  found_key->offset);
-					ret = -EINVAL;
-					goto out;
-				}
+				BUG_ON(start < p->buf);
 			}
 			p->start = start;
 		} else {
@@ -1319,7 +1306,6 @@ static int find_extent_clone(struct send_ctx *sctx,
 	u64 disk_byte;
 	u64 num_bytes;
 	u64 extent_item_pos;
-	u64 extent_refs;
 	u64 flags = 0;
 	struct btrfs_file_extent_item *fi;
 	struct extent_buffer *eb = path->nodes[0];
@@ -1387,22 +1373,14 @@ static int find_extent_clone(struct send_ctx *sctx,
 
 	ei = btrfs_item_ptr(tmp_path->nodes[0], tmp_path->slots[0],
 			    struct btrfs_extent_item);
-	extent_refs = btrfs_extent_refs(tmp_path->nodes[0], ei);
 	/*
 	 * Backreference walking (iterate_extent_inodes() below) is currently
 	 * too expensive when an extent has a large number of references, both
 	 * in time spent and used memory. So for now just fallback to write
 	 * operations instead of clone operations when an extent has more than
 	 * a certain amount of references.
-	 *
-	 * Also, if we have only one reference and only the send root as a clone
-	 * source - meaning no clone roots were given in the struct
-	 * btrfs_ioctl_send_args passed to the send ioctl - then it's our
-	 * reference and there's no point in doing backref walking which is
-	 * expensive, so exit early.
 	 */
-	if ((extent_refs == 1 && sctx->clone_roots_cnt == 1) ||
-	    extent_refs > SEND_MAX_EXTENT_REFS) {
+	if (btrfs_extent_refs(tmp_path->nodes[0], ei) > SEND_MAX_EXTENT_REFS) {
 		ret = -ENOENT;
 		goto out;
 	}
@@ -4978,10 +4956,6 @@ static ssize_t fill_read_buf(struct send_ctx *sctx, u64 offset, u32 len)
 			lock_page(page);
 			if (!PageUptodate(page)) {
 				unlock_page(page);
-				btrfs_err(fs_info,
-			"send: IO error at offset %llu for inode %llu root %llu",
-					page_offset(page), sctx->cur_ino,
-					sctx->send_root->root_key.objectid);
 				put_page(page);
 				ret = -EIO;
 				break;
@@ -6839,10 +6813,10 @@ long btrfs_ioctl_send(struct file *mnt_file, struct btrfs_ioctl_send_args *arg)
 	/*
 	 * Check that we don't overflow at later allocations, we request
 	 * clone_sources_count + 1 items, and compare to unsigned long inside
-	 * access_ok. Also set an upper limit for allocation size so this can't
-	 * easily exhaust memory. Max number of clone sources is about 200K.
+	 * access_ok.
 	 */
-	if (arg->clone_sources_count > SZ_8M / sizeof(struct clone_root)) {
+	if (arg->clone_sources_count >
+	    ULONG_MAX / sizeof(struct clone_root) - 1) {
 		ret = -EINVAL;
 		goto out;
 	}
@@ -6855,7 +6829,7 @@ long btrfs_ioctl_send(struct file *mnt_file, struct btrfs_ioctl_send_args *arg)
 	}
 
 	if (arg->flags & ~BTRFS_SEND_FLAG_MASK) {
-		ret = -EOPNOTSUPP;
+		ret = -EINVAL;
 		goto out;
 	}
 
@@ -6873,7 +6847,7 @@ long btrfs_ioctl_send(struct file *mnt_file, struct btrfs_ioctl_send_args *arg)
 	sctx->flags = arg->flags;
 
 	sctx->send_filp = fget(arg->send_fd);
-	if (!sctx->send_filp || !(sctx->send_filp->f_mode & FMODE_WRITE)) {
+	if (!sctx->send_filp) {
 		ret = -EBADF;
 		goto out;
 	}

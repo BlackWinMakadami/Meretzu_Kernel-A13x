@@ -72,7 +72,7 @@ struct snd_info_private_data {
 };
 
 static int snd_info_version_init(void);
-static void snd_info_clear_entries(struct snd_info_entry *entry);
+static void snd_info_disconnect(struct snd_info_entry *entry);
 
 /*
 
@@ -127,9 +127,9 @@ static loff_t snd_info_entry_llseek(struct file *file, loff_t offset, int orig)
 	entry = data->entry;
 	mutex_lock(&entry->access);
 	if (entry->c.ops->llseek) {
-		ret = entry->c.ops->llseek(entry,
-					   data->file_private_data,
-					   file, offset, orig);
+		offset = entry->c.ops->llseek(entry,
+					      data->file_private_data,
+					      file, offset, orig);
 		goto out;
 	}
 
@@ -446,12 +446,23 @@ static const struct file_operations snd_info_text_entry_ops =
 	.read =			seq_read,
 };
 
-static struct snd_info_entry *create_subdir(struct module *mod,
-					    const char *name)
+/*
+ * snd_info_create_subdir - create and register a subdir for a given parent
+ * @mod: the module pointer
+ * @name: the module name
+ * @parent: the parent directory
+ *
+ * Creates and registers new subdir entry inside a given parent.
+ *
+ * Return: The pointer of the new instance, or NULL on failure.
+ */
+struct snd_info_entry *snd_info_create_subdir(struct module *mod,
+					      const char *name,
+					      struct snd_info_entry *parent)
 {
 	struct snd_info_entry *entry;
 
-	entry = snd_info_create_module_entry(mod, name, NULL);
+	entry = snd_info_create_module_entry(mod, name, parent);
 	if (!entry)
 		return NULL;
 	entry->mode = S_IFDIR | 0555;
@@ -461,6 +472,7 @@ static struct snd_info_entry *create_subdir(struct module *mod,
 	}
 	return entry;
 }
+EXPORT_SYMBOL(snd_info_create_subdir);
 
 static struct snd_info_entry *
 snd_info_create_entry(const char *name, struct snd_info_entry *parent);
@@ -475,12 +487,12 @@ int __init snd_info_init(void)
 	if (!snd_proc_root->p)
 		goto error;
 #ifdef CONFIG_SND_OSSEMUL
-	snd_oss_root = create_subdir(THIS_MODULE, "oss");
+	snd_oss_root = snd_info_create_subdir(THIS_MODULE, "oss", NULL);
 	if (!snd_oss_root)
 		goto error;
 #endif
 #if IS_ENABLED(CONFIG_SND_SEQUENCER)
-	snd_seq_root = create_subdir(THIS_MODULE, "seq");
+	snd_seq_root = snd_info_create_subdir(THIS_MODULE, "seq", NULL);
 	if (!snd_seq_root)
 		goto error;
 #endif
@@ -516,7 +528,7 @@ int snd_info_card_create(struct snd_card *card)
 		return -ENXIO;
 
 	sprintf(str, "card%i", card->number);
-	entry = create_subdir(card->module, str);
+	entry = snd_info_create_subdir(card->module, str, NULL);
 	if (!entry)
 		return -ENOMEM;
 	card->proc_root = entry;
@@ -598,16 +610,11 @@ void snd_info_card_disconnect(struct snd_card *card)
 {
 	if (!card)
 		return;
-
-	proc_remove(card->proc_root_link);
-	if (card->proc_root)
-		proc_remove(card->proc_root->p);
-
 	mutex_lock(&info_mutex);
-	if (card->proc_root)
-		snd_info_clear_entries(card->proc_root);
+	proc_remove(card->proc_root_link);
 	card->proc_root_link = NULL;
-	card->proc_root = NULL;
+	if (card->proc_root)
+		snd_info_disconnect(card->proc_root);
 	mutex_unlock(&info_mutex);
 }
 
@@ -623,7 +630,6 @@ int snd_info_card_free(struct snd_card *card)
 	card->proc_root = NULL;
 	return 0;
 }
-
 
 /**
  * snd_info_get_line - read one line from the procfs buffer
@@ -781,14 +787,15 @@ struct snd_info_entry *snd_info_create_card_entry(struct snd_card *card,
 }
 EXPORT_SYMBOL(snd_info_create_card_entry);
 
-static void snd_info_clear_entries(struct snd_info_entry *entry)
+static void snd_info_disconnect(struct snd_info_entry *entry)
 {
 	struct snd_info_entry *p;
 
 	if (!entry->p)
 		return;
 	list_for_each_entry(p, &entry->children, list)
-		snd_info_clear_entries(p);
+		snd_info_disconnect(p);
+	proc_remove(entry->p);
 	entry->p = NULL;
 }
 
@@ -805,9 +812,8 @@ void snd_info_free_entry(struct snd_info_entry * entry)
 	if (!entry)
 		return;
 	if (entry->p) {
-		proc_remove(entry->p);
 		mutex_lock(&info_mutex);
-		snd_info_clear_entries(entry);
+		snd_info_disconnect(entry);
 		mutex_unlock(&info_mutex);
 	}
 

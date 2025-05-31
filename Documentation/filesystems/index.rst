@@ -1,9 +1,6 @@
-=====================
 Linux Filesystems API
-=====================
 
 The Linux VFS
-=============
 
 The Filesystem types
 --------------------
@@ -105,7 +102,6 @@ Other Functions
    :export:
 
 The proc filesystem
-===================
 
 sysctl interface
 ----------------
@@ -120,13 +116,11 @@ proc filesystem interface
    :internal:
 
 Events based on file descriptors
-================================
 
 .. kernel-doc:: fs/eventfd.c
    :export:
 
 The Filesystem for Exporting Kernel Objects
-===========================================
 
 .. kernel-doc:: fs/sysfs/file.c
    :export:
@@ -135,7 +129,6 @@ The Filesystem for Exporting Kernel Objects
    :export:
 
 The debugfs filesystem
-======================
 
 debugfs interface
 -----------------
@@ -147,7 +140,6 @@ debugfs interface
    :export:
 
 The Linux Journalling API
-=========================
 
 Overview
 --------
@@ -331,7 +323,6 @@ Tweedie <http://kernel.org/pub/linux/kernel/people/sct/ext3/journal-design.ps.gz
 Tweedie <http://olstrans.sourceforge.net/release/OLS2000-ext3/OLS2000-ext3.html>`__
 
 splice API
-==========
 
 splice is a method for moving blocks of data around inside the kernel,
 without continually transferring them between the kernel and user space.
@@ -339,7 +330,6 @@ without continually transferring them between the kernel and user space.
 .. kernel-doc:: fs/splice.c
 
 pipes API
-=========
 
 Pipe interfaces are all for in-kernel (builtin image) use. They are not
 exported for use by modules.
@@ -350,7 +340,6 @@ exported for use by modules.
 .. kernel-doc:: fs/pipe.c
 
 Encryption API
-==============
 
 A library which filesystems can hook into to support transparent
 encryption of files and directories.
@@ -359,3 +348,4 @@ encryption of files and directories.
     :maxdepth: 2
 
     fscrypt
+    fsverity

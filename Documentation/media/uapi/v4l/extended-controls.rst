@@ -8,7 +8,6 @@ Extended Controls
 
 
 Introduction
-============
 
 The control mechanism as originally designed was meant to be used for
 user settings (brightness, saturation, etc). However, it turned out to
@@ -36,7 +35,6 @@ described in the following text.
 
 
 The Extended Control API
-========================
 
 Three new ioctls are available:
 :ref:`VIDIOC_G_EXT_CTRLS <VIDIOC_G_EXT_CTRLS>`,
@@ -103,7 +101,6 @@ All controls use machine endianness.
 
 
 Enumerating Extended Controls
-=============================
 
 The recommended way to enumerate over the extended controls is by using
 :ref:`VIDIOC_QUERYCTRL` in combination with the
@@ -160,7 +157,6 @@ including driver-private controls.
 
 
 Creating Control Panels
-=======================
 
 It is possible to create control panels for a graphical user interface
 where the user can select the various controls. Basically you will have
@@ -179,7 +175,6 @@ details.
 .. _mpeg-controls:
 
 Codec Control Reference
-=======================
 
 Below all controls within the Codec control class are described. First
 the generic controls, then controls specific for certain hardware.
@@ -1140,6 +1135,12 @@ enum v4l2_mpeg_video_h264_entropy_mode -
 
 ``V4L2_CID_MPEG_VIDEO_H264_8X8_TRANSFORM (boolean)``
     Enable 8X8 transform for H264. Applicable to the H264 encoder.
+
+
+``V4L2_CID_MPEG_VIDEO_H264_CHROMA_QP_INDEX_OFFSET (integer)``
+    Specify the offset that should be added to the luma quantization
+    parameter to determine the chroma quantization parameter. Applicable
+    to the H264 encoder.
 
 ``V4L2_CID_MPEG_VIDEO_CYCLIC_INTRA_REFRESH_MB (integer)``
     Cyclic intra macroblock refresh. This is the number of continuous
@@ -2415,7 +2416,6 @@ enum v4l2_mpeg_video_hevc_size_of_length_field -
 .. _camera-controls:
 
 Camera Control Reference
-========================
 
 The Camera class includes controls for mechanical (or equivalent
 digital) features of a device such as controllable lenses or sensors.
@@ -2911,7 +2911,6 @@ enum v4l2_scene_mode -
 .. _fm-tx-controls:
 
 FM Transmitter Control Reference
-================================
 
 The FM Transmitter (FM_TX) class includes controls for common features
 of FM transmissions capable devices. Currently this class includes
@@ -3091,7 +3090,6 @@ document, from CENELEC.
 .. _flash-controls:
 
 Flash Control Reference
-=======================
 
 The V4L2 flash controls are intended to provide generic access to flash
 controller devices. Flash controller devices are typically used in
@@ -3275,7 +3273,6 @@ Flash Control IDs
 .. _jpeg-controls:
 
 JPEG Control Reference
-======================
 
 The JPEG class includes controls for common features of JPEG encoders
 and decoders. Currently it includes features for codecs implementing
@@ -3380,7 +3377,6 @@ For more details about JPEG specification, refer to :ref:`itu-t81`,
 .. _image-source-controls:
 
 Image Source Control Reference
-==============================
 
 The Image Source control class is intended for low-level control of
 image source devices such as image sensors. The devices feature an
@@ -3429,7 +3425,6 @@ Image Source Control IDs
 .. _image-process-controls:
 
 Image Process Control Reference
-===============================
 
 The Image Process control class is intended for low-level control of
 image processing functions. Unlike ``V4L2_CID_IMAGE_SOURCE_CLASS``, the
@@ -3484,7 +3479,6 @@ Image Process Control IDs
 .. _dv-controls:
 
 Digital Video Control Reference
-===============================
 
 The Digital Video control class is intended to control receivers and
 transmitters for `VGA <http://en.wikipedia.org/wiki/Vga>`__,
@@ -3642,7 +3636,6 @@ enum v4l2_dv_it_content_type -
 .. _fm-rx-controls:
 
 FM Receiver Control Reference
-=============================
 
 The FM Receiver (FM_RX) class includes controls for common features of
 FM Reception capable devices.
@@ -3731,7 +3724,6 @@ enum v4l2_deemphasis -
 .. _detect-controls:
 
 Detect Control Reference
-========================
 
 The Detect class includes controls for common features of various motion
 or object detection capable devices.
@@ -3794,7 +3786,6 @@ Detect Control IDs
 .. _rf-tuner-controls:
 
 RF Tuner Control Reference
-==========================
 
 The RF Tuner (RF_TUNER) class includes controls for common features of
 devices having RF tuner.

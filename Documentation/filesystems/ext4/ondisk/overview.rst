@@ -1,7 +1,6 @@
 .. SPDX-License-Identifier: GPL-2.0
 
 High Level Design
-=================
 
 An ext4 file system is split into a series of block groups. To reduce
 performance difficulties due to fragmentation, the block allocator tries
@@ -24,3 +23,4 @@ order.
 .. include:: bigalloc.rst
 .. include:: inlinedata.rst
 .. include:: eainode.rst
+.. include:: verity.rst

@@ -702,7 +702,7 @@ void wbc_detach_inode(struct writeback_control *wbc)
 		 * is okay.  The main goal is avoiding keeping an inode on
 		 * the wrong wb for an extended period of time.
 		 */
-		if (hweight16(history) > WB_FRN_HIST_THR_SLOTS)
+		if (hweight32(history) > WB_FRN_HIST_THR_SLOTS)
 			inode_switch_wbs(inode, max_id);
 	}
 
@@ -1377,6 +1377,8 @@ __writeback_single_inode(struct inode *inode, struct writeback_control *wbc)
 	long nr_to_write = wbc->nr_to_write;
 	unsigned dirty;
 	int ret;
+	/* @fs.sec -- 62cf6bdd87a5c084b05e3bb9a11045a339d42a6b -- */
+	bool newly_dirty = false;
 
 	WARN_ON(!(inode->i_state & I_SYNC));
 
@@ -1433,10 +1435,12 @@ __writeback_single_inode(struct inode *inode, struct writeback_control *wbc)
 	smp_mb();
 
 	if (mapping_tagged(mapping, PAGECACHE_TAG_DIRTY))
-		inode->i_state |= I_DIRTY_PAGES;
+		newly_dirty = true;
 
 	spin_unlock(&inode->i_lock);
 
+	if (newly_dirty)
+		__mark_inode_dirty(inode, I_DIRTY_PAGES);
 	/* Don't write the inode if only I_DIRTY_PAGES was set */
 	if (dirty & ~I_DIRTY_PAGES) {
 		int err = write_inode(inode, wbc);
@@ -1568,12 +1572,11 @@ static long writeback_sb_inodes(struct super_block *sb,
 	};
 	unsigned long start_time = jiffies;
 	long write_chunk;
-	long total_wrote = 0;  /* count both pages and inodes */
+	long wrote = 0;  /* count both pages and inodes */
 
 	while (!list_empty(&wb->b_io)) {
 		struct inode *inode = wb_inode(wb->b_io.prev);
 		struct bdi_writeback *tmp_wb;
-		long wrote;
 
 		if (inode->i_sb != sb) {
 			if (work->sb) {
@@ -1649,9 +1652,7 @@ static long writeback_sb_inodes(struct super_block *sb,
 
 		wbc_detach_inode(&wbc);
 		work->nr_pages -= write_chunk - wbc.nr_to_write;
-		wrote = write_chunk - wbc.nr_to_write - wbc.pages_skipped;
-		wrote = wrote < 0 ? 0 : wrote;
-		total_wrote += wrote;
+		wrote += write_chunk - wbc.nr_to_write;
 
 		if (need_resched()) {
 			/*
@@ -1673,7 +1674,7 @@ static long writeback_sb_inodes(struct super_block *sb,
 		tmp_wb = inode_to_wb_and_lock_list(inode);
 		spin_lock(&inode->i_lock);
 		if (!(inode->i_state & I_DIRTY_ALL))
-			total_wrote++;
+			wrote++;
 		requeue_inode(inode, tmp_wb, &wbc);
 		inode_sync_complete(inode);
 		spin_unlock(&inode->i_lock);
@@ -1687,14 +1688,14 @@ static long writeback_sb_inodes(struct super_block *sb,
 		 * bail out to wb_writeback() often enough to check
 		 * background threshold and other termination conditions.
 		 */
-		if (total_wrote) {
+		if (wrote) {
 			if (time_is_before_jiffies(start_time + HZ / 10UL))
 				break;
 			if (work->nr_pages <= 0)
 				break;
 		}
 	}
-	return total_wrote;
+	return wrote;
 }
 
 static long __writeback_inodes_wb(struct bdi_writeback *wb,

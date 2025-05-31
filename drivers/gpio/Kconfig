@@ -12,7 +12,6 @@ config ARCH_HAVE_CUSTOM_GPIO_H
 
 menuconfig GPIOLIB
 	bool "GPIO Support"
-	select ANON_INODES
 	help
 	  This enables GPIO support through the generic GPIO library.
 	  You only need to enable this, if you also want to enable
@@ -865,6 +864,12 @@ config GPIO_PCA953X_IRQ
 	help
 	  Say yes here to enable the pca953x to be used as an interrupt
 	  controller. It requires the driver to be built in the kernel.
+
+config GPIO_PCAL6524
+	bool "PCAL6524 GPIO expander"
+	depends on I2C
+	help
+	  GPIO driver for PCAL6524 I2C-based GPIO expander.
 
 config GPIO_PCF857X
 	tristate "PCF857x, PCA{85,96}7x, and MAX732[89] I2C GPIO expanders"

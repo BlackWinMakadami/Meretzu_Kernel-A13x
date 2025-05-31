@@ -22,7 +22,7 @@
  */
 
 /* handling of USB vendor/product ID pairs as 32-bit numbers */
-#define USB_ID(vendor, product) (((unsigned int)(vendor) << 16) | (product))
+#define USB_ID(vendor, product) (((vendor) << 16) | (product))
 #define USB_ID_VENDOR(id) ((id) >> 16)
 #define USB_ID_PRODUCT(id) ((u16)(id))
 
@@ -66,6 +66,9 @@ struct snd_usb_audio {
 					 */
 
 	struct usb_host_interface *ctrl_intf;	/* the audio control interface */
+	struct mutex dev_lock;  /* to protect any race with disconnect */
+	int card_num;	/* cache pcm card number to use upon disconnect */
+	void (*disconnect_cb)(struct snd_usb_audio *chip); /* callback to cleanup on disconnect */
 };
 
 #define USB_AUDIO_IFACE_UNUSED	((void *)-1L)

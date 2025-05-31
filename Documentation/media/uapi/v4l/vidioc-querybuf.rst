@@ -13,14 +13,12 @@ VIDIOC_QUERYBUF - Query the status of a buffer
 
 
 Synopsis
-========
 
 .. c:function:: int ioctl( int fd, VIDIOC_QUERYBUF, struct v4l2_buffer *argp )
     :name: VIDIOC_QUERYBUF
 
 
 Arguments
-=========
 
 ``fd``
     File descriptor returned by :ref:`open() <func-open>`.
@@ -30,7 +28,6 @@ Arguments
 
 
 Description
-===========
 
 This ioctl is part of the :ref:`streaming <mmap>` I/O method. It can
 be used to query the status of a buffer at any time after buffers have
@@ -45,6 +42,7 @@ number of buffers allocated with
 :ref:`VIDIOC_REQBUFS` (struct
 :c:type:`v4l2_requestbuffers` ``count``) minus
 one. The ``reserved`` and ``reserved2`` fields must be set to 0. When
+one. The ``reserved`` field must be set to 0. When
 using the :ref:`multi-planar API <planar-apis>`, the ``m.planes``
 field must contain a userspace pointer to an array of struct
 :c:type:`v4l2_plane` and the ``length`` field has to be set
@@ -64,12 +62,17 @@ elements will be used instead and the ``length`` field of struct
 array elements. The driver may or may not set the remaining fields and
 flags, they are meaningless in this context.
 
-The struct :c:type:`v4l2_buffer` structure is specified in
-:ref:`buffer`.
+When using in-fences, the ``V4L2_BUF_FLAG_IN_FENCE`` will be set if the
+in-fence didn't signal at the time of the
+:ref:`VIDIOC_QUERYBUF`. The ``V4L2_BUF_FLAG_OUT_FENCE`` will be set if
+the user asked for an out-fence for the buffer and the ``fence_fd``
+field will be set to the out-fence fd. In case ``V4L2_BUF_FLAG_OUT_FENCE`` is
+not set ``fence_fd`` will be set to 0 for backward compatibility.
+
+The struct :c:type:`v4l2_buffer` structure is specified in :ref:`buffer`.
 
 
 Return Value
-============
 
 On success 0 is returned, on error -1 and the ``errno`` variable is set
 appropriately. The generic error codes are described at the

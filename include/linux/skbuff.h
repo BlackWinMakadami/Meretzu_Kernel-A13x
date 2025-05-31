@@ -249,8 +249,8 @@ struct nf_conntrack {
 	atomic_t use;
 };
 #endif
+#include <linux/android_kabi.h>
 
-#if IS_ENABLED(CONFIG_BRIDGE_NETFILTER)
 struct nf_bridge_info {
 	refcount_t		use;
 	enum {
@@ -278,7 +278,6 @@ struct nf_bridge_info {
 		char neigh_header[8];
 	};
 };
-#endif
 
 struct sk_buff_head {
 	/* These two members must be first. */
@@ -512,6 +511,12 @@ struct skb_shared_info {
 	 * remains valid until skb destructor */
 	void *		destructor_arg;
 
+// SEC_PRODUCT_FEATURE_KNOX_SUPPORT_VPN {
+	uid_t uid;
+	pid_t pid;
+	u_int32_t knox_mark;
+// SEC_PRODUCT_FEATURE_KNOX_SUPPORT_VPN }
+
 	/* must be last field, see pskb_expand_head() */
 	skb_frag_t	frags[MAX_SKB_FRAGS];
 };
@@ -713,9 +718,7 @@ struct sk_buff {
 #if defined(CONFIG_NF_CONNTRACK) || defined(CONFIG_NF_CONNTRACK_MODULE)
 	unsigned long		 _nfct;
 #endif
-#if IS_ENABLED(CONFIG_BRIDGE_NETFILTER)
 	struct nf_bridge_info	*nf_bridge;
-#endif
 	unsigned int		len,
 				data_len;
 	__u16			mac_len,
@@ -825,7 +828,6 @@ struct sk_buff {
 #ifdef CONFIG_NETWORK_SECMARK
 	__u32		secmark;
 #endif
-
 	union {
 		__u32		mark;
 		__u32		reserved_tailroom;
@@ -848,6 +850,9 @@ struct sk_buff {
 	/* private: */
 	__u32			headers_end[0];
 	/* public: */
+
+	ANDROID_KABI_RESERVE(1);
+	ANDROID_KABI_RESERVE(2);
 
 	/* These elements must be at the end, see alloc_skb() for details.  */
 	sk_buff_data_t		tail;
@@ -1761,7 +1766,7 @@ static inline void __skb_insert(struct sk_buff *newsk,
 	WRITE_ONCE(newsk->prev, prev);
 	WRITE_ONCE(next->prev, newsk);
 	WRITE_ONCE(prev->next, newsk);
-	WRITE_ONCE(list->qlen, list->qlen + 1);
+	list->qlen++;
 }
 
 static inline void __skb_queue_splice(const struct sk_buff_head *list,
@@ -2786,15 +2791,6 @@ static inline void skb_propagate_pfmemalloc(struct page *page,
 {
 	if (page_is_pfmemalloc(page))
 		skb->pfmemalloc = true;
-}
-
-/**
- * skb_frag_off() - Returns the offset of a skb fragment
- * @frag: the paged fragment
- */
-static inline unsigned int skb_frag_off(const skb_frag_t *frag)
-{
-	return frag->page_offset;
 }
 
 /**
@@ -3923,8 +3919,8 @@ static inline void nf_reset(struct sk_buff *skb)
 #endif
 #if IS_ENABLED(CONFIG_BRIDGE_NETFILTER)
 	nf_bridge_put(skb->nf_bridge);
-	skb->nf_bridge = NULL;
 #endif
+	skb->nf_bridge = NULL;
 }
 
 static inline void nf_reset_trace(struct sk_buff *skb)

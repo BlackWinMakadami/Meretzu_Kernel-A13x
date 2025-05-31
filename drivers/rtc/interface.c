@@ -125,6 +125,46 @@ int rtc_read_time(struct rtc_device *rtc, struct rtc_time *tm)
 }
 EXPORT_SYMBOL_GPL(rtc_read_time);
 
+#ifdef CONFIG_RTC_HIGH_RES
+static int __rtc_read_hrtime(struct rtc_device *rtc, struct rtc_hrtime *tm)
+{
+	int err;
+	if (!rtc->ops)
+		err = -ENODEV;
+	else if (!rtc->ops->read_hrtime)
+		err = -EINVAL;
+	else {
+		memset(tm, 0, sizeof(struct rtc_hrtime));
+		err = rtc->ops->read_hrtime(rtc->dev.parent, tm);
+		if (err < 0) {
+			dev_dbg(&rtc->dev, "read_hrtime: fail to read: %d\n",
+					err);
+			return err;
+		}
+
+		err = rtc_valid_hrtm(tm);
+		if (err < 0)
+			dev_dbg(&rtc->dev,
+					"read_hrtime: rtc_hrtime isn't valid\n");
+	}
+	return err;
+}
+
+int rtc_read_hrtime(struct rtc_device *rtc, struct rtc_hrtime *tm)
+{
+	int err;
+
+	err = mutex_lock_interruptible(&rtc->ops_lock);
+	if (err)
+		return err;
+
+	err = __rtc_read_hrtime(rtc, tm);
+	mutex_unlock(&rtc->ops_lock);
+
+	return err;
+}
+#endif /* CONFIG_RTC_HIGH_RES*/
+
 int rtc_set_time(struct rtc_device *rtc, struct rtc_time *tm)
 {
 	int err, uie;
@@ -914,18 +954,13 @@ void rtc_timer_do_work(struct work_struct *work)
 	struct timerqueue_node *next;
 	ktime_t now;
 	struct rtc_time tm;
-	int err;
 
 	struct rtc_device *rtc =
 		container_of(work, struct rtc_device, irqwork);
 
 	mutex_lock(&rtc->ops_lock);
 again:
-	err = __rtc_read_time(rtc, &tm);
-	if (err) {
-		mutex_unlock(&rtc->ops_lock);
-		return;
-	}
+	__rtc_read_time(rtc, &tm);
 	now = rtc_tm_to_ktime(tm);
 	while ((next = timerqueue_getnext(&rtc->timerqueue))) {
 		if (next->expires > now)

@@ -4,7 +4,6 @@ Documentation for /proc/sys/vm/*	kernel version 2.6.29
 
 For general info and legal blurb, please look in README.
 
-==============================================================
 
 This file contains the documentation for the sysctl files in
 /proc/sys/vm and is valid for Linux kernel version 2.6.29.
@@ -31,6 +30,7 @@ Currently, these files are in /proc/sys/vm:
 - dirty_writeback_centisecs
 - drop_caches
 - extfrag_threshold
+- extra_free_kbytes
 - hugetlb_shm_group
 - laptop_mode
 - legacy_va_layout
@@ -66,7 +66,6 @@ Currently, these files are in /proc/sys/vm:
 - watermark_scale_factor
 - zone_reclaim_mode
 
-==============================================================
 
 admin_reserve_kbytes
 
@@ -95,14 +94,12 @@ On x86_64 this is about 128MB.
 
 Changing this takes effect whenever an application requests memory.
 
-==============================================================
 
 block_dump
 
 block_dump enables block I/O debugging when set to a nonzero value. More
 information on block I/O debugging is in Documentation/laptops/laptop-mode.txt.
 
-==============================================================
 
 compact_memory
 
@@ -111,7 +108,6 @@ all zones are compacted such that free memory is available in contiguous
 blocks where possible. This can be important for example in the allocation of
 huge pages although processes will also directly compact memory as required.
 
-==============================================================
 
 compact_unevictable_allowed
 
@@ -121,7 +117,6 @@ This should be used on systems where stalls for minor page faults are an
 acceptable trade for large contiguous free memory.  Set to 0 to prevent
 compaction from moving pages that are unevictable.  Default value is 1.
 
-==============================================================
 
 dirty_background_bytes
 
@@ -133,7 +128,6 @@ one of them may be specified at a time. When one sysctl is written it is
 immediately taken into account to evaluate the dirty memory limits and the
 other appears as 0 when read.
 
-==============================================================
 
 dirty_background_ratio
 
@@ -143,7 +137,6 @@ flusher threads will start writing out dirty data.
 
 The total available memory is not equal to total system memory.
 
-==============================================================
 
 dirty_bytes
 
@@ -159,7 +152,6 @@ Note: the minimum value allowed for dirty_bytes is two pages (in bytes); any
 value lower than this limit will be ignored and the old configuration will be
 retained.
 
-==============================================================
 
 dirty_expire_centisecs
 
@@ -168,7 +160,6 @@ for writeout by the kernel flusher threads.  It is expressed in 100'ths
 of a second.  Data which has been dirty in-memory for longer than this
 interval will be written out next time a flusher thread wakes up.
 
-==============================================================
 
 dirty_ratio
 
@@ -178,7 +169,6 @@ generating disk writes will itself start writing out dirty data.
 
 The total available memory is not equal to total system memory.
 
-==============================================================
 
 dirtytime_expire_seconds
 
@@ -190,7 +180,6 @@ eventually gets pushed out to disk.  This tunable is used to define when dirty
 inode is old enough to be eligible for writeback by the kernel flusher threads.
 And, it is also used as the interval to wakeup dirtytime_writeback thread.
 
-==============================================================
 
 dirty_writeback_centisecs
 
@@ -200,7 +189,6 @@ out to disk.  This tunable expresses the interval between those wakeups, in
 
 Setting this to zero disables periodic writeback altogether.
 
-==============================================================
 
 drop_caches
 
@@ -238,7 +226,6 @@ used:
 These are informational only.  They do not mean that anything is wrong
 with your system.  To disable them, echo 4 (bit 3) into drop_caches.
 
-==============================================================
 
 extfrag_threshold
 
@@ -252,7 +239,6 @@ implies that the allocation will succeed as long as watermarks are met.
 The kernel will not compact memory in a zone if the
 fragmentation index is <= extfrag_threshold. The default value is 500.
 
-==============================================================
 
 highmem_is_dirtyable
 
@@ -272,28 +258,38 @@ OOM killer because some writers (e.g. direct block device writes) can
 only use the low memory and they can fill it up with dirty data without
 any throttling.
 
-==============================================================
+
+extra_free_kbytes
+
+This parameter tells the VM to keep extra free memory between the threshold
+where background reclaim (kswapd) kicks in, and the threshold where direct
+reclaim (by allocating processes) kicks in.
+
+This is useful for workloads that require low latency memory allocations
+and have a bounded burstiness in memory allocations, for example a
+realtime application that receives and transmits network traffic
+(causing in-kernel memory allocations) with a maximum total message burst
+size of 200MB may need 200MB of extra free memory to avoid direct reclaim
+related latencies.
+
 
 hugetlb_shm_group
 
 hugetlb_shm_group contains group id that is allowed to create SysV
 shared memory segment using hugetlb page.
 
-==============================================================
 
 laptop_mode
 
 laptop_mode is a knob that controls "laptop mode". All the things that are
 controlled by this knob are discussed in Documentation/laptops/laptop-mode.txt.
 
-==============================================================
 
 legacy_va_layout
 
 If non-zero, this sysctl disables the new 32-bit mmap layout - the kernel
 will use the legacy (2.4) layout for all processes.
 
-==============================================================
 
 lowmem_reserve_ratio
 
@@ -379,7 +375,6 @@ If you would like to protect more pages, smaller values are effective.
 The minimum value is 1 (1/1 -> 100%). The value less than 1 completely
 disables protection of the pages.
 
-==============================================================
 
 max_map_count:
 
@@ -394,7 +389,6 @@ e.g., up to one or two maps per allocation.
 
 The default value is 65536.
 
-=============================================================
 
 memory_failure_early_kill:
 
@@ -422,7 +416,6 @@ check handling and depends on the hardware capabilities.
 
 Applications can override this setting individually with the PR_MCE_KILL prctl
 
-==============================================================
 
 memory_failure_recovery
 
@@ -432,7 +425,6 @@ Enable memory failure recovery (when supported by the platform)
 
 0: Always panic on a memory failure.
 
-==============================================================
 
 min_free_kbytes:
 
@@ -448,7 +440,6 @@ become subtly broken, and prone to deadlock under high loads.
 
 Setting this too high will OOM your machine instantly.
 
-=============================================================
 
 min_slab_ratio:
 
@@ -466,7 +457,6 @@ Note that slab reclaim is triggered in a per zone / node fashion.
 The process of reclaiming slab memory is currently not node specific
 and may not be fast.
 
-=============================================================
 
 min_unmapped_ratio:
 
@@ -483,7 +473,6 @@ files and similar are considered.
 
 The default is 1 percent.
 
-==============================================================
 
 mmap_min_addr
 
@@ -496,7 +485,6 @@ security module.  Setting this value to something like 64k will allow the
 vast majority of applications to work correctly and provide defense in depth
 against future potential kernel bugs.
 
-==============================================================
 
 mmap_rnd_bits:
 
@@ -509,7 +497,6 @@ by the architecture's minimum and maximum supported values.
 This value can be changed after boot using the
 /proc/sys/vm/mmap_rnd_bits tunable
 
-==============================================================
 
 mmap_rnd_compat_bits:
 
@@ -523,7 +510,6 @@ architecture's minimum and maximum supported values.
 This value can be changed after boot using the
 /proc/sys/vm/mmap_rnd_compat_bits tunable
 
-==============================================================
 
 nr_hugepages
 
@@ -531,7 +517,6 @@ Change the minimum size of the hugepage pool.
 
 See Documentation/admin-guide/mm/hugetlbpage.rst
 
-==============================================================
 
 nr_hugepages_mempolicy
 
@@ -540,7 +525,6 @@ set of NUMA nodes.
 
 See Documentation/admin-guide/mm/hugetlbpage.rst
 
-==============================================================
 
 nr_overcommit_hugepages
 
@@ -549,7 +533,6 @@ nr_hugepages + nr_overcommit_hugepages.
 
 See Documentation/admin-guide/mm/hugetlbpage.rst
 
-==============================================================
 
 nr_trim_pages
 
@@ -566,7 +549,6 @@ The default value is 1.
 
 See Documentation/nommu-mmap.txt for more information.
 
-==============================================================
 
 numa_zonelist_order
 
@@ -614,7 +596,6 @@ order will be selected.
 Default order is recommended unless this is causing problems for your
 system/application.
 
-==============================================================
 
 oom_dump_tasks
 
@@ -636,7 +617,6 @@ OOM killer actually kills a memory-hogging task.
 
 The default value is 1 (enabled).
 
-==============================================================
 
 oom_kill_allocating_task
 
@@ -657,7 +637,6 @@ is used in oom_kill_allocating_task.
 
 The default value is 0.
 
-==============================================================
 
 overcommit_kbytes:
 
@@ -668,7 +647,6 @@ Note: overcommit_kbytes is the counterpart of overcommit_ratio. Only one
 of them may be specified at a time. Setting one disables the other (which
 then appears as 0 when read).
 
-==============================================================
 
 overcommit_memory:
 
@@ -693,7 +671,6 @@ The default value is 0.
 See Documentation/vm/overcommit-accounting.rst and
 mm/util.c::__vm_enough_memory() for more information.
 
-==============================================================
 
 overcommit_ratio:
 
@@ -701,7 +678,6 @@ When overcommit_memory is set to 2, the committed address
 space is not permitted to exceed swap plus this percentage
 of physical RAM.  See above.
 
-==============================================================
 
 page-cluster
 
@@ -723,7 +699,6 @@ Lower values mean lower latencies for initial faults, but at the same time
 extra faults and I/O delays for following faults if they would have been part of
 that consecutive pages readahead would have brought in.
 
-=============================================================
 
 panic_on_oom
 
@@ -750,7 +725,6 @@ according to your policy of failover.
 panic_on_oom=2+kdump gives you very strong tool to investigate
 why oom happens. You can get snapshot.
 
-=============================================================
 
 percpu_pagelist_fraction
 
@@ -768,14 +742,12 @@ The initial value is zero.  Kernel does not use this value at boot time to set
 the high water marks for each per cpu page list.  If the user writes '0' to this
 sysctl, it will revert to this default behavior.
 
-==============================================================
 
 stat_interval
 
 The time interval between which vm statistics are updated.  The default
 is 1 second.
 
-==============================================================
 
 stat_refresh
 
@@ -788,7 +760,6 @@ as 0) and "fails" with EINVAL if any are found, with a warning in dmesg.
 (At time of writing, a few stats are known sometimes to be found negative,
 with no ill effects: errors and warnings on these stats are suppressed.)
 
-==============================================================
 
 numa_stat
 
@@ -803,7 +774,6 @@ When page allocation performance is not a bottleneck and you want all
 tooling to work, you can do:
 	echo 1 > /proc/sys/vm/numa_stat
 
-==============================================================
 
 swappiness
 
@@ -815,7 +785,6 @@ than the high water mark in a zone.
 
 The default value is 60.
 
-==============================================================
 
 - user_reserve_kbytes
 
@@ -833,7 +802,6 @@ Any subsequent attempts to execute a command will result in
 
 Changing this takes effect whenever an application requests memory.
 
-==============================================================
 
 vfs_cache_pressure
 ------------------
@@ -854,7 +822,6 @@ performance impact. Reclaim code needs to take various locks to find freeable
 directory and inode objects. With vfs_cache_pressure=1000, it will look for
 ten times more freeable objects than there are.
 
-=============================================================
 
 watermark_scale_factor:
 
@@ -872,7 +839,6 @@ that the number of free pages kswapd maintains for latency reasons is
 too small for the allocation bursts occurring in the system. This knob
 can then be used to tune kswapd aggressiveness accordingly.
 
-==============================================================
 
 zone_reclaim_mode:
 
@@ -910,4 +876,3 @@ Allowing regular swap effectively restricts allocations to the local
 node unless explicitly overridden by memory policies or cpuset
 configurations.
 
-============ End of Document =================================

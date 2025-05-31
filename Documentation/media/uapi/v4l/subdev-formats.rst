@@ -3,7 +3,6 @@
 .. _v4l2-mbus-format:
 
 Media Bus Formats
-=================
 
 .. tabularcolumns:: |p{4.4cm}|p{4.4cm}|p{8.7cm}|
 

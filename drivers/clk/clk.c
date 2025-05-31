@@ -45,6 +45,15 @@ static struct hlist_head *all_lists[] = {
 	&clk_orphan_list,
 	NULL,
 };
+/*
+ * clk_rate_change_list is used during clk_core_set_rate_nolock() calls to
+ * handle vdd_class vote tracking.  core->rate_change_node is added to
+ * clk_rate_change_list when core->new_rate requires a different voltage level
+ * (core->new_vdd_class_vote) than core->vdd_class_vote.  Elements are removed
+ * from the list after unvoting core->vdd_class_vote immediately before
+ * returning from clk_core_set_rate_nolock().
+ */
+static LIST_HEAD(clk_rate_change_list);
 
 /***    private data structures    ***/
 
@@ -66,6 +75,9 @@ struct clk_core {
 	struct clk_core		*new_child;
 	unsigned long		flags;
 	bool			orphan;
+	bool			rpm_enabled;
+	bool			need_sync;
+	bool			boot_enabled;
 	unsigned int		enable_count;
 	unsigned int		prepare_count;
 	unsigned int		protect_count;
@@ -101,9 +113,9 @@ struct clk {
 /***           runtime pm          ***/
 static int clk_pm_runtime_get(struct clk_core *core)
 {
-	int ret = 0;
+	int ret;
 
-	if (!core->dev)
+	if (!core->rpm_enabled)
 		return 0;
 
 	ret = pm_runtime_get_sync(core->dev);
@@ -116,7 +128,7 @@ static int clk_pm_runtime_get(struct clk_core *core)
 
 static void clk_pm_runtime_put(struct clk_core *core)
 {
-	if (!core->dev)
+	if (!core->rpm_enabled)
 		return;
 
 	pm_runtime_put_sync(core->dev);
@@ -236,7 +248,7 @@ static bool clk_core_is_enabled(struct clk_core *core)
 	 * taking enable spinlock, but the below check is needed if one tries
 	 * to call it from other places.
 	 */
-	if (core->dev) {
+	if (core->rpm_enabled) {
 		pm_runtime_get_noresume(core->dev);
 		if (!pm_runtime_active(core->dev)) {
 			ret = false;
@@ -244,20 +256,9 @@ static bool clk_core_is_enabled(struct clk_core *core)
 		}
 	}
 
-	/*
-	 * This could be called with the enable lock held, or from atomic
-	 * context. If the parent isn't enabled already, we can't do
-	 * anything here. We can also assume this clock isn't enabled.
-	 */
-	if ((core->flags & CLK_OPS_PARENT_ENABLE) && core->parent)
-		if (!clk_core_is_enabled(core->parent)) {
-			ret = false;
-			goto done;
-		}
-
 	ret = core->ops->is_enabled(core->hw);
 done:
-	if (core->dev)
+	if (core->rpm_enabled)
 		pm_runtime_put(core->dev);
 
 	return ret;
@@ -534,24 +535,6 @@ static void clk_core_get_boundaries(struct clk_core *core,
 		*max_rate = min(*max_rate, clk_user->max_rate);
 }
 
-static bool clk_core_check_boundaries(struct clk_core *core,
-				      unsigned long min_rate,
-				      unsigned long max_rate)
-{
-	struct clk *user;
-
-	lockdep_assert_held(&prepare_lock);
-
-	if (min_rate > core->max_rate || max_rate < core->min_rate)
-		return false;
-
-	hlist_for_each_entry(user, &core->clks, clks_node)
-		if (min_rate > user->max_rate || max_rate < user->min_rate)
-			return false;
-
-	return true;
-}
-
 void clk_hw_set_rate_range(struct clk_hw *hw, unsigned long min_rate,
 			   unsigned long max_rate)
 {
@@ -743,9 +726,10 @@ static void clk_core_unprepare(struct clk_core *core)
 	if (core->ops->unprepare)
 		core->ops->unprepare(core->hw);
 
+	clk_pm_runtime_put(core);
+
 	trace_clk_unprepare_complete(core);
 	clk_core_unprepare(core->parent);
-	clk_pm_runtime_put(core);
 }
 
 static void clk_core_unprepare_lock(struct clk_core *core)
@@ -1013,6 +997,10 @@ static void clk_unprepare_unused_subtree(struct clk_core *core)
 	hlist_for_each_entry(child, &core->children, child_node)
 		clk_unprepare_unused_subtree(child);
 
+	if (dev_has_sync_state(core->dev) &&
+	    !(core->flags & CLK_DONT_HOLD_STATE))
+		return;
+
 	if (core->prepare_count)
 		return;
 
@@ -1043,6 +1031,10 @@ static void clk_disable_unused_subtree(struct clk_core *core)
 
 	hlist_for_each_entry(child, &core->children, child_node)
 		clk_disable_unused_subtree(child);
+
+	if (dev_has_sync_state(core->dev) &&
+	    !(core->flags & CLK_DONT_HOLD_STATE))
+		return;
 
 	if (core->flags & CLK_OPS_PARENT_ENABLE)
 		clk_core_prepare_enable(core->parent);
@@ -1116,6 +1108,38 @@ static int clk_disable_unused(void)
 	return 0;
 }
 late_initcall_sync(clk_disable_unused);
+
+static void clk_unprepare_disable_dev_subtree(struct clk_core *core,
+					      struct device *dev)
+{
+	struct clk_core *child;
+
+	lockdep_assert_held(&prepare_lock);
+
+	hlist_for_each_entry(child, &core->children, child_node)
+		clk_unprepare_disable_dev_subtree(child, dev);
+
+	if (core->dev != dev || !core->need_sync)
+		return;
+
+	clk_core_disable_unprepare(core);
+}
+
+void clk_sync_state(struct device *dev)
+{
+	struct clk_core *core;
+
+	clk_prepare_lock();
+
+	hlist_for_each_entry(core, &clk_root_list, child_node)
+		clk_unprepare_disable_dev_subtree(core, dev);
+
+	hlist_for_each_entry(core, &clk_orphan_list, child_node)
+		clk_unprepare_disable_dev_subtree(core, dev);
+
+	clk_prepare_unlock();
+}
+EXPORT_SYMBOL_GPL(clk_sync_state);
 
 static int clk_core_determine_round_nolock(struct clk_core *core,
 					   struct clk_rate_request *req)
@@ -1464,6 +1488,33 @@ static int clk_fetch_parent_index(struct clk_core *core,
 			return i;
 
 	return -EINVAL;
+}
+
+static void clk_core_hold_state(struct clk_core *core)
+{
+	if (core->need_sync || !core->boot_enabled)
+		return;
+
+	if (core->orphan || !dev_has_sync_state(core->dev))
+		return;
+
+	if (core->flags & CLK_DONT_HOLD_STATE)
+		return;
+
+	core->need_sync = !clk_core_prepare_enable(core);
+}
+
+static void __clk_core_update_orphan_hold_state(struct clk_core *core)
+{
+	struct clk_core *child;
+
+	if (core->orphan)
+		return;
+
+	clk_core_hold_state(core);
+
+	hlist_for_each_entry(child, &core->children, child_node)
+		__clk_core_update_orphan_hold_state(child);
 }
 
 /*
@@ -2094,11 +2145,6 @@ int clk_set_rate_range(struct clk *clk, unsigned long min, unsigned long max)
 	clk->min_rate = min;
 	clk->max_rate = max;
 
-	if (!clk_core_check_boundaries(clk->core, min, max)) {
-		ret = -EINVAL;
-		goto out;
-	}
-
 	rate = clk_core_get_rate_nolock(clk->core);
 	if (rate < min || rate > max) {
 		/*
@@ -2127,7 +2173,6 @@ int clk_set_rate_range(struct clk *clk, unsigned long min, unsigned long max)
 		}
 	}
 
-out:
 	if (clk->exclusive_count)
 		clk_core_rate_protect(clk->core);
 
@@ -2650,18 +2695,13 @@ EXPORT_SYMBOL_GPL(clk_is_match);
 
 /***        debugfs support        ***/
 
-#ifdef CONFIG_DEBUG_FS
+#if defined(CONFIG_DEBUG_FS) && !defined(CONFIG_ARCH_EXYNOS)
 #include <linux/debugfs.h>
 
 static struct dentry *rootdir;
 static int inited = 0;
 static DEFINE_MUTEX(clk_debug_lock);
 static HLIST_HEAD(clk_debug_list);
-
-static struct hlist_head *orphan_list[] = {
-	&clk_orphan_list,
-	NULL,
-};
 
 static void clk_summary_show_one(struct seq_file *s, struct clk_core *c,
 				 int level)
@@ -2849,19 +2889,19 @@ static void clk_debug_create_one(struct clk_core *core, struct dentry *pdentry)
 	root = debugfs_create_dir(core->name, pdentry);
 	core->dentry = root;
 
-	debugfs_create_ulong("clk_rate", 0444, root, &core->rate);
-	debugfs_create_ulong("clk_accuracy", 0444, root, &core->accuracy);
-	debugfs_create_u32("clk_phase", 0444, root, &core->phase);
-	debugfs_create_file("clk_flags", 0444, root, core, &clk_flags_fops);
-	debugfs_create_u32("clk_prepare_count", 0444, root, &core->prepare_count);
-	debugfs_create_u32("clk_enable_count", 0444, root, &core->enable_count);
-	debugfs_create_u32("clk_protect_count", 0444, root, &core->protect_count);
-	debugfs_create_u32("clk_notifier_count", 0444, root, &core->notifier_count);
-	debugfs_create_file("clk_duty_cycle", 0444, root, core,
+	debugfs_create_ulong("clk_rate", 0400, root, &core->rate);
+	debugfs_create_ulong("clk_accuracy", 0400, root, &core->accuracy);
+	debugfs_create_u32("clk_phase", 0400, root, &core->phase);
+	debugfs_create_file("clk_flags", 0400, root, core, &clk_flags_fops);
+	debugfs_create_u32("clk_prepare_count", 0400, root, &core->prepare_count);
+	debugfs_create_u32("clk_enable_count", 0400, root, &core->enable_count);
+	debugfs_create_u32("clk_protect_count", 0400, root, &core->protect_count);
+	debugfs_create_u32("clk_notifier_count", 0400, root, &core->notifier_count);
+	debugfs_create_file("clk_duty_cycle", 0400, root, core,
 			    &clk_duty_cycle_fops);
 
 	if (core->num_parents > 1)
-		debugfs_create_file("clk_possible_parents", 0444, root, core,
+		debugfs_create_file("clk_possible_parents", 0400, root, core,
 				    &possible_parents_fops);
 
 	if (core->ops->debug_init)
@@ -2917,13 +2957,13 @@ static int __init clk_debug_init(void)
 
 	rootdir = debugfs_create_dir("clk", NULL);
 
-	debugfs_create_file("clk_summary", 0444, rootdir, &all_lists,
+	debugfs_create_file("clk_summary", 0400, rootdir, &all_lists,
 			    &clk_summary_fops);
-	debugfs_create_file("clk_dump", 0444, rootdir, &all_lists,
+	debugfs_create_file("clk_dump", 0400, rootdir, &all_lists,
 			    &clk_dump_fops);
-	debugfs_create_file("clk_orphan_summary", 0444, rootdir, &orphan_list,
+	debugfs_create_file("clk_orphan_summary", 0400, rootdir, &orphan_list,
 			    &clk_summary_fops);
-	debugfs_create_file("clk_orphan_dump", 0444, rootdir, &orphan_list,
+	debugfs_create_file("clk_orphan_dump", 0400, rootdir, &orphan_list,
 			    &clk_dump_fops);
 
 	mutex_lock(&clk_debug_lock);
@@ -3096,6 +3136,8 @@ static int __clk_core_init(struct clk_core *core)
 		rate = 0;
 	core->rate = core->req_rate = rate;
 
+	core->boot_enabled = clk_core_is_enabled(core);
+
 	/*
 	 * Enable CLK_IS_CRITICAL clocks so newly added critical clocks
 	 * don't get accidentally disabled when walking the orphan tree and
@@ -3117,6 +3159,8 @@ static int __clk_core_init(struct clk_core *core)
 		}
 	}
 
+	clk_core_hold_state(core);
+
 	/*
 	 * walk the list of orphan clocks and reparent any that newly finds a
 	 * parent.
@@ -3136,6 +3180,7 @@ static int __clk_core_init(struct clk_core *core)
 			__clk_set_parent_after(orphan, parent, NULL);
 			__clk_recalc_accuracies(orphan);
 			__clk_recalc_rates(orphan, 0);
+			__clk_core_update_orphan_hold_state(orphan);
 		}
 	}
 
@@ -3225,7 +3270,8 @@ struct clk *clk_register(struct device *dev, struct clk_hw *hw)
 	core->ops = hw->init->ops;
 
 	if (dev && pm_runtime_enabled(dev))
-		core->dev = dev;
+		core->rpm_enabled = true;
+	core->dev = dev;
 	if (dev && dev->driver)
 		core->owner = dev->driver->owner;
 	core->hw = hw;

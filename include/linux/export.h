@@ -103,7 +103,7 @@ struct kernel_symbol {
  */
 #define __EXPORT_SYMBOL(sym, sec)	=== __KSYM_##sym ===
 
-#elif defined(CONFIG_TRIM_UNUSED_KSYMS)
+#elif defined(CONFIG_TRIM_UNUSED_KSYMS) && !defined(MODULE)
 
 #include <generated/autoksyms.h>
 
@@ -122,6 +122,11 @@ struct kernel_symbol {
 
 #define EXPORT_SYMBOL(sym)					\
 	__EXPORT_SYMBOL(sym, "")
+#if IS_ENABLED(CONFIG_SEC_KUNIT) && IS_ENABLED(CONFIG_KUNIT)
+#define EXPORT_SYMBOL_KUNIT(sym)	__EXPORT_SYMBOL(sym, "")
+#else
+#define EXPORT_SYMBOL_KUNIT(sym)	/* nothing */
+#endif
 
 #define EXPORT_SYMBOL_GPL(sym)					\
 	__EXPORT_SYMBOL(sym, "_gpl")

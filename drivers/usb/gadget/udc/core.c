@@ -99,10 +99,12 @@ int usb_ep_enable(struct usb_ep *ep)
 		goto out;
 
 	/* UDC drivers can't handle endpoints with maxpacket size 0 */
-	if (!ep->desc || usb_endpoint_maxp(ep->desc) == 0) {
-		WARN_ONCE(1, "%s: ep%d (%s) has %s\n", __func__, ep->address, ep->name,
-			  (!ep->desc) ? "NULL descriptor" : "maxpacket 0");
-
+	if (usb_endpoint_maxp(ep->desc) == 0) {
+		/*
+		 * We should log an error message here, but we can't call
+		 * dev_err() because there's no way to find the gadget
+		 * given only ep.
+		 */
 		ret = -EINVAL;
 		goto out;
 	}
@@ -271,9 +273,7 @@ int usb_ep_queue(struct usb_ep *ep,
 {
 	int ret = 0;
 
-	if (!ep->enabled && ep->address) {
-		pr_debug("USB gadget: queue request to disabled ep 0x%x (%s)\n",
-				 ep->address, ep->name);
+	if (WARN_ON_ONCE(!ep->enabled && ep->address)) {
 		ret = -ESHUTDOWN;
 		goto out;
 	}
@@ -505,6 +505,43 @@ out:
 	return ret;
 }
 EXPORT_SYMBOL_GPL(usb_gadget_wakeup);
+
+/**
+ * usb_gsi_ep_op - performs operation on GSI accelerated EP based on EP op code
+ *
+ * Operations such as EP configuration, TRB allocation, StartXfer etc.
+ * See gsi_ep_op for more details.
+ */
+int usb_gsi_ep_op(struct usb_ep *ep,
+		struct usb_gsi_request *req, enum gsi_ep_op op)
+{
+	if (ep && ep->ops && ep->ops->gsi_ep_op)
+		return ep->ops->gsi_ep_op(ep, req, op);
+
+	return -EOPNOTSUPP;
+}
+EXPORT_SYMBOL_GPL(usb_gsi_ep_op);
+
+/**
+ * usb_gadget_func_wakeup - send a function remote wakeup up notification
+ * to the host connected to this gadget
+ * @gadget: controller used to wake up the host
+ * @interface_id: the interface which triggered the remote wakeup event
+ *
+ * Returns zero on success. Otherwise, negative error code is returned.
+ */
+int usb_gadget_func_wakeup(struct usb_gadget *gadget,
+	int interface_id)
+{
+	if (!gadget || (gadget->speed != USB_SPEED_SUPER))
+		return -EOPNOTSUPP;
+
+	if (!gadget->ops || !gadget->ops->func_wakeup)
+		return -EOPNOTSUPP;
+
+	return gadget->ops->func_wakeup(gadget, interface_id);
+}
+EXPORT_SYMBOL_GPL(usb_gadget_func_wakeup);
 
 /**
  * usb_gadget_set_selfpowered - sets the device selfpowered feature.
@@ -1297,6 +1334,7 @@ static void usb_gadget_remove_driver(struct usb_udc *udc)
 	usb_gadget_udc_stop(udc);
 
 	udc->driver = NULL;
+	udc->dev.driver = NULL;
 	udc->gadget->dev.driver = NULL;
 }
 
@@ -1345,6 +1383,7 @@ static int udc_bind_to_driver(struct usb_udc *udc, struct usb_gadget_driver *dri
 			driver->function);
 
 	udc->driver = driver;
+	udc->dev.driver = &driver->driver;
 	udc->gadget->dev.driver = &driver->driver;
 
 	usb_gadget_udc_set_speed(udc, driver->max_speed);
@@ -1366,6 +1405,7 @@ err1:
 		dev_err(&udc->dev, "failed to start %s: %d\n",
 			udc->driver->function, ret);
 	udc->driver = NULL;
+	udc->dev.driver = NULL;
 	udc->gadget->dev.driver = NULL;
 	return ret;
 }

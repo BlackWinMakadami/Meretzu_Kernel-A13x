@@ -107,13 +107,6 @@ static __inline__ struct ipv6_pinfo *inet6_sk_generic(struct sock *sk)
 	return (struct ipv6_pinfo *)(((u8 *)sk) + offset);
 }
 
-void inet6_sock_destruct(struct sock *sk)
-{
-	inet6_cleanup_sock(sk);
-	inet_sock_destruct(sk);
-}
-EXPORT_SYMBOL_GPL(inet6_sock_destruct);
-
 static int inet6_create(struct net *net, struct socket *sock, int protocol,
 			int kern)
 {
@@ -206,7 +199,7 @@ lookup_protocol:
 			inet->hdrincl = 1;
 	}
 
-	sk->sk_destruct		= inet6_sock_destruct;
+	sk->sk_destruct		= inet_sock_destruct;
 	sk->sk_family		= PF_INET6;
 	sk->sk_protocol		= protocol;
 
@@ -443,14 +436,11 @@ out_unlock:
 int inet6_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 {
 	struct sock *sk = sock->sk;
-	const struct proto *prot;
 	int err = 0;
 
-	/* IPV6_ADDRFORM can change sk->sk_prot under us. */
-	prot = READ_ONCE(sk->sk_prot);
 	/* If the socket has its own bind function then use it. */
-	if (prot->bind)
-		return prot->bind(sk, uaddr, addr_len);
+	if (sk->sk_prot->bind)
+		return sk->sk_prot->bind(sk, uaddr, addr_len);
 
 	if (addr_len < SIN6_LEN_RFC2133)
 		return -EINVAL;
@@ -512,12 +502,6 @@ void inet6_destroy_sock(struct sock *sk)
 }
 EXPORT_SYMBOL_GPL(inet6_destroy_sock);
 
-void inet6_cleanup_sock(struct sock *sk)
-{
-	inet6_destroy_sock(sk);
-}
-EXPORT_SYMBOL_GPL(inet6_cleanup_sock);
-
 /*
  *	This does both peername and sockname.
  */
@@ -561,7 +545,6 @@ int inet6_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 {
 	struct sock *sk = sock->sk;
 	struct net *net = sock_net(sk);
-	const struct proto *prot;
 
 	switch (cmd) {
 	case SIOCGSTAMP:
@@ -582,11 +565,9 @@ int inet6_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 	case SIOCSIFDSTADDR:
 		return addrconf_set_dstaddr(net, (void __user *) arg);
 	default:
-		/* IPV6_ADDRFORM can change sk->sk_prot under us. */
-		prot = READ_ONCE(sk->sk_prot);
-		if (!prot->ioctl)
+		if (!sk->sk_prot->ioctl)
 			return -ENOIOCTLCMD;
-		return prot->ioctl(sk, cmd, arg);
+		return sk->sk_prot->ioctl(sk, cmd, arg);
 	}
 	/*NOTREACHED*/
 	return 0;

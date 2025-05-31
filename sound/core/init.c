@@ -257,6 +257,7 @@ int snd_card_new(struct device *parent, int idx, const char *xid,
 #endif
 	init_waitqueue_head(&card->remove_sleep);
 
+	init_waitqueue_head(&card->offline_poll_wait);
 	device_initialize(&card->card_dev);
 	card->card_dev.parent = parent;
 	card->card_dev.class = sound_class;
@@ -548,19 +549,13 @@ int snd_card_free(struct snd_card *card)
 }
 EXPORT_SYMBOL(snd_card_free);
 
-/* check, if the character is in the valid ASCII range */
-static inline bool safe_ascii_char(char c)
-{
-	return isascii(c) && isalnum(c);
-}
-
 /* retrieve the last word of shortname or longname */
 static const char *retrieve_id_from_card_name(const char *name)
 {
 	const char *spos = name;
 
 	while (*name) {
-		if (isspace(*name) && safe_ascii_char(name[1]))
+		if (isspace(*name) && isalnum(name[1]))
 			spos = name + 1;
 		name++;
 	}
@@ -587,12 +582,12 @@ static void copy_valid_id_string(struct snd_card *card, const char *src,
 {
 	char *id = card->id;
 
-	while (*nid && !safe_ascii_char(*nid))
+	while (*nid && !isalnum(*nid))
 		nid++;
 	if (isdigit(*nid))
 		*id++ = isalpha(*src) ? *src : 'D';
 	while (*nid && (size_t)(id - card->id) < sizeof(card->id) - 1) {
-		if (safe_ascii_char(*nid))
+		if (isalnum(*nid))
 			*id++ = *nid;
 		nid++;
 	}
@@ -690,7 +685,7 @@ card_id_store_attr(struct device *dev, struct device_attribute *attr,
 
 	for (idx = 0; idx < copy; idx++) {
 		c = buf[idx];
-		if (!safe_ascii_char(c) && c != '_' && c != '-')
+		if (!isalnum(c) && c != '_' && c != '-')
 			return -EINVAL;
 	}
 	memcpy(buf1, buf, copy);
@@ -1003,6 +998,25 @@ int snd_card_file_remove(struct snd_card *card, struct file *file)
 	return 0;
 }
 EXPORT_SYMBOL(snd_card_file_remove);
+
+/**
+ * snd_card_change_online_state - mark card's online/offline state
+ * @card: Card to mark
+ * @online: whether online of offline
+ *
+ * Mutes the DAI DAC.
+ */
+void snd_card_change_online_state(struct snd_card *card, int online)
+{
+	snd_printd("snd card %s state change %d -> %d\n",
+		   card->shortname, !card->offline, online);
+	card->offline = !online;
+	/* make sure offline is updated prior to wake up */
+	wmb();
+	xchg(&card->offline_change, 1);
+	wake_up_interruptible(&card->offline_poll_wait);
+}
+EXPORT_SYMBOL_GPL(snd_card_change_online_state);
 
 #ifdef CONFIG_PM
 /**

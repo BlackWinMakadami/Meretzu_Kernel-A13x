@@ -162,8 +162,6 @@ COND_SYSCALL(syslog);
 
 /* kernel/sched/core.c */
 
-/* kernel/signal.c */
-
 /* kernel/sys.c */
 COND_SYSCALL(setregid);
 COND_SYSCALL(setgid);
@@ -257,7 +255,6 @@ COND_SYSCALL_COMPAT(keyctl);
 
 /* mm/fadvise.c */
 COND_SYSCALL(fadvise64_64);
-COND_SYSCALL_COMPAT(fadvise64_64);
 
 /* mm/, CONFIG_MMU only */
 COND_SYSCALL(swapon);

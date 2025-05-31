@@ -21,6 +21,7 @@
 #include <linux/platform_device.h>
 #include <linux/errno.h>
 #include <linux/io.h>
+#include <linux/io-pgtable.h>
 #include <linux/interrupt.h>
 #include <linux/list.h>
 #include <linux/spinlock.h>
@@ -35,7 +36,6 @@
 
 #include "msm_iommu_hw-8xxx.h"
 #include "msm_iommu.h"
-#include "io-pgtable.h"
 
 #define MRC(reg, processor, op1, crn, crm, op2)				\
 __asm__ __volatile__ (							\
@@ -638,19 +638,16 @@ static void insert_iommu_master(struct device *dev,
 static int qcom_iommu_of_xlate(struct device *dev,
 			       struct of_phandle_args *spec)
 {
-	struct msm_iommu_dev *iommu = NULL, *iter;
+	struct msm_iommu_dev *iommu;
 	unsigned long flags;
 	int ret = 0;
 
 	spin_lock_irqsave(&msm_iommu_lock, flags);
-	list_for_each_entry(iter, &qcom_iommu_devices, dev_node) {
-		if (iter->dev->of_node == spec->np) {
-			iommu = iter;
+	list_for_each_entry(iommu, &qcom_iommu_devices, dev_node)
+		if (iommu->dev->of_node == spec->np)
 			break;
-		}
-	}
 
-	if (!iommu) {
+	if (!iommu || iommu->dev->of_node != spec->np) {
 		ret = -ENODEV;
 		goto fail;
 	}

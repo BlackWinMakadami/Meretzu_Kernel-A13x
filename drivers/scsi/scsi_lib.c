@@ -279,7 +279,11 @@ int __scsi_execute(struct scsi_device *sdev, const unsigned char *cmd,
 	rq->cmd_len = COMMAND_SIZE(cmd[0]);
 	memcpy(rq->cmd, cmd, rq->cmd_len);
 	rq->retries = retries;
-	req->timeout = timeout;
+	if (likely(!sdev->timeout_override))
+		req->timeout = timeout;
+	else
+		req->timeout = sdev->timeout_override;
+
 	req->cmd_flags |= flags;
 	req->rq_flags |= rq_flags | RQF_QUIET;
 
@@ -1731,7 +1735,7 @@ static void scsi_kill_request(struct request *req, struct request_queue *q)
 	blk_complete_request(req);
 }
 
-static void scsi_softirq_done(struct request *rq)
+void scsi_softirq_done(struct request *rq)
 {
 	struct scsi_cmnd *cmd = blk_mq_rq_to_pdu(rq);
 	unsigned long wait_for = (cmd->allowed + 1) * rq->timeout;
@@ -1804,7 +1808,6 @@ static int scsi_dispatch_cmd(struct scsi_cmnd *cmd)
 		 */
 		SCSI_LOG_MLQUEUE(3, scmd_printk(KERN_INFO, cmd,
 			"queuecommand : device blocked\n"));
-		atomic_dec(&cmd->device->iorequest_cnt);
 		return SCSI_MLQUEUE_DEVICE_BUSY;
 	}
 
@@ -1837,7 +1840,6 @@ static int scsi_dispatch_cmd(struct scsi_cmnd *cmd)
 	trace_scsi_dispatch_cmd_start(cmd);
 	rtn = host->hostt->queuecommand(host, cmd);
 	if (rtn) {
-		atomic_dec(&cmd->device->iorequest_cnt);
 		trace_scsi_dispatch_cmd_error(cmd, rtn);
 		if (rtn != SCSI_MLQUEUE_DEVICE_BUSY &&
 		    rtn != SCSI_MLQUEUE_TARGET_BUSY)
@@ -2159,7 +2161,8 @@ out_put_budget:
 	case BLK_STS_OK:
 		break;
 	case BLK_STS_RESOURCE:
-		if (scsi_device_blocked(sdev))
+		if (atomic_read(&sdev->device_busy) ||
+		    scsi_device_blocked(sdev))
 			ret = BLK_STS_DEV_RESOURCE;
 		break;
 	default:
@@ -2469,6 +2472,33 @@ void scsi_unblock_requests(struct Scsi_Host *shost)
 	scsi_run_host_queues(shost);
 }
 EXPORT_SYMBOL(scsi_unblock_requests);
+
+/*
+ * Function:    scsi_set_cmd_timeout_override()
+ *
+ * Purpose:     Utility function used by low-level drivers to override
+		timeout for the scsi commands.
+ *
+ * Arguments:   sdev       - scsi device in question
+ *		timeout	   - timeout in jiffies
+ *
+ * Returns:     Nothing
+ *
+ * Lock status: No locks are assumed held.
+ *
+ * Notes:	Some platforms might be very slow and command completion may
+ *		take much longer than default scsi command timeouts.
+ *		SCSI Read/Write command timeout can be changed by
+ *		blk_queue_rq_timeout() but there is no option to override
+ *		timeout for rest of the scsi commands. This function would
+ *		would allow this.
+ */
+void scsi_set_cmd_timeout_override(struct scsi_device *sdev,
+				   unsigned int timeout)
+{
+	sdev->timeout_override = timeout;
+}
+EXPORT_SYMBOL(scsi_set_cmd_timeout_override);
 
 int __init scsi_init_queue(void)
 {
@@ -2875,9 +2905,6 @@ static void scsi_evt_emit(struct scsi_device *sdev, struct scsi_event *evt)
 	case SDEV_EVT_ALUA_STATE_CHANGE_REPORTED:
 		envp[idx++] = "SDEV_UA=ASYMMETRIC_ACCESS_STATE_CHANGED";
 		break;
-	case SDEV_EVT_POWER_ON_RESET_OCCURRED:
-		envp[idx++] = "SDEV_UA=POWER_ON_RESET_OCCURRED";
-		break;
 	default:
 		/* do nothing */
 		break;
@@ -2982,7 +3009,6 @@ struct scsi_event *sdev_evt_alloc(enum scsi_device_event evt_type,
 	case SDEV_EVT_MODE_PARAMETER_CHANGE_REPORTED:
 	case SDEV_EVT_LUN_CHANGE_REPORTED:
 	case SDEV_EVT_ALUA_STATE_CHANGE_REPORTED:
-	case SDEV_EVT_POWER_ON_RESET_OCCURRED:
 	default:
 		/* do nothing */
 		break;

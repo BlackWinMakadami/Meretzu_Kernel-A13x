@@ -808,11 +808,14 @@ static void dapm_set_mixer_path_status(struct snd_soc_dapm_path *p, int i,
 	} else {
 		/* since a virtual mixer has no backing registers to
 		 * decide which path to connect, it will try to match
-		 * with initial state.  This is to ensure
+		 * with initial value 0.  This is to ensure
 		 * that the default mixer choice will be
 		 * correctly powered up during initialization.
 		 */
-		p->connect = invert;
+		val = 0;
+		if (invert)
+			val = max - val;
+		p->connect = !!val;
 	}
 }
 
@@ -1233,6 +1236,18 @@ static int is_connected_input_ep(struct snd_soc_dapm_widget *widget,
 			is_connected_input_ep, custom_stop_condition);
 }
 
+int snd_soc_dapm_connected_output_ep(struct snd_soc_dapm_widget *widget,
+	struct list_head *list)
+{
+	return is_connected_output_ep(widget, list, NULL);
+}
+
+int snd_soc_dapm_connected_input_ep(struct snd_soc_dapm_widget *widget,
+	struct list_head *list)
+{
+	return is_connected_input_ep(widget, list, NULL);
+}
+
 /**
  * snd_soc_dapm_get_connected_widgets - query audio path and it's widgets.
  * @dai: the soc DAI.
@@ -1608,10 +1623,13 @@ static void dapm_seq_run(struct snd_soc_card *card,
 	list_for_each_entry_safe(w, n, list, power_list) {
 		ret = 0;
 
+		dev_info(w->dapm->dev, "dapm powering %s widget %s\n",
+				power_up ? "up" : "down", w->name);
+
 		/* Do we need to apply any queued changes? */
 		if (sort[w->id] != cur_sort || w->reg != cur_reg ||
 		    w->dapm != cur_dapm || w->subseq != cur_subseq) {
-			if (!list_empty(&pending))
+			if (cur_dapm && !list_empty(&pending))
 				dapm_seq_run_coalesced(card, &pending);
 
 			if (cur_dapm && cur_dapm->seq_notifier) {
@@ -1635,7 +1653,8 @@ static void dapm_seq_run(struct snd_soc_card *card,
 		switch (w->id) {
 		case snd_soc_dapm_pre:
 			if (!w->event)
-				continue;
+				list_for_each_entry_safe_continue(w, n, list,
+								  power_list);
 
 			if (event == SND_SOC_DAPM_STREAM_START)
 				ret = w->event(w,
@@ -1647,7 +1666,8 @@ static void dapm_seq_run(struct snd_soc_card *card,
 
 		case snd_soc_dapm_post:
 			if (!w->event)
-				continue;
+				list_for_each_entry_safe_continue(w, n, list,
+								  power_list);
 
 			if (event == SND_SOC_DAPM_STREAM_START)
 				ret = w->event(w,
@@ -1672,7 +1692,7 @@ static void dapm_seq_run(struct snd_soc_card *card,
 				"ASoC: Failed to apply widget power: %d\n", ret);
 	}
 
-	if (!list_empty(&pending))
+	if (cur_dapm && !list_empty(&pending))
 		dapm_seq_run_coalesced(card, &pending);
 
 	if (cur_dapm && cur_dapm->seq_notifier) {
@@ -1917,6 +1937,7 @@ static int dapm_power_widgets(struct snd_soc_card *card, int event)
 	lockdep_assert_held(&card->dapm_mutex);
 
 	trace_snd_soc_dapm_start(card);
+	mutex_lock(&card->dapm_power_mutex);
 
 	list_for_each_entry(d, &card->dapm_list, list) {
 		if (dapm_idle_bias_off(d))
@@ -2036,6 +2057,7 @@ static int dapm_power_widgets(struct snd_soc_card *card, int event)
 	pop_dbg(card->dev, card->pop_time,
 		"DAPM sequencing finished, waiting %dms\n", card->pop_time);
 	pop_wait(card->pop_time);
+	mutex_unlock(&card->dapm_power_mutex);
 
 	trace_snd_soc_dapm_done(card);
 
@@ -2509,16 +2531,10 @@ static struct snd_soc_dapm_widget *dapm_find_widget(
 	return NULL;
 }
 
-/*
- * set the DAPM pin status:
- * returns 1 when the value has been updated, 0 when unchanged, or a negative
- * error code; called from kcontrol put callback
- */
-static int __snd_soc_dapm_set_pin(struct snd_soc_dapm_context *dapm,
-				  const char *pin, int status)
+static int snd_soc_dapm_set_pin(struct snd_soc_dapm_context *dapm,
+				const char *pin, int status)
 {
 	struct snd_soc_dapm_widget *w = dapm_find_widget(dapm, pin, true);
-	int ret = 0;
 
 	dapm_assert_locked(dapm);
 
@@ -2531,26 +2547,13 @@ static int __snd_soc_dapm_set_pin(struct snd_soc_dapm_context *dapm,
 		dapm_mark_dirty(w, "pin configuration");
 		dapm_widget_invalidate_input_paths(w);
 		dapm_widget_invalidate_output_paths(w);
-		ret = 1;
 	}
 
 	w->connected = status;
 	if (status == 0)
 		w->force = 0;
 
-	return ret;
-}
-
-/*
- * similar as __snd_soc_dapm_set_pin(), but returns 0 when successful;
- * called from several API functions below
- */
-static int snd_soc_dapm_set_pin(struct snd_soc_dapm_context *dapm,
-				const char *pin, int status)
-{
-	int ret = __snd_soc_dapm_set_pin(dapm, pin, status);
-
-	return ret < 0 ? ret : 0;
+	return 0;
 }
 
 /**
@@ -3302,6 +3305,7 @@ int snd_soc_dapm_put_volsw(struct snd_kcontrol *kcontrol,
 			update.val = val;
 			card->update = &update;
 		}
+		change |= reg_change;
 
 		ret = soc_dapm_mixer_update_power(card, kcontrol, connect,
 						  rconnect);
@@ -3407,6 +3411,7 @@ int snd_soc_dapm_put_enum_double(struct snd_kcontrol *kcontrol,
 			update.val = val;
 			card->update = &update;
 		}
+		change |= reg_change;
 
 		ret = soc_dapm_mux_update_power(card, kcontrol, item[0], e);
 
@@ -3476,15 +3481,14 @@ int snd_soc_dapm_put_pin_switch(struct snd_kcontrol *kcontrol,
 {
 	struct snd_soc_card *card = snd_kcontrol_chip(kcontrol);
 	const char *pin = (const char *)kcontrol->private_value;
-	int ret;
 
-	mutex_lock_nested(&card->dapm_mutex, SND_SOC_DAPM_CLASS_RUNTIME);
-	ret = __snd_soc_dapm_set_pin(&card->dapm, pin,
-				     !!ucontrol->value.integer.value[0]);
-	mutex_unlock(&card->dapm_mutex);
+	if (ucontrol->value.integer.value[0])
+		snd_soc_dapm_enable_pin(&card->dapm, pin);
+	else
+		snd_soc_dapm_disable_pin(&card->dapm, pin);
 
 	snd_soc_dapm_sync(&card->dapm);
-	return ret;
+	return 0;
 }
 EXPORT_SYMBOL_GPL(snd_soc_dapm_put_pin_switch);
 
@@ -3874,7 +3878,7 @@ static int snd_soc_dapm_dai_link_put(struct snd_kcontrol *kcontrol,
 
 	w->params_select = ucontrol->value.enumerated.item[0];
 
-	return 1;
+	return 0;
 }
 
 static void
@@ -4264,7 +4268,8 @@ void snd_soc_dapm_connect_dai_link_widgets(struct snd_soc_card *card)
 		 * dynamic FE links have no fixed DAI mapping.
 		 * CODEC<->CODEC links have no direct connection.
 		 */
-		if (rtd->dai_link->dynamic || rtd->dai_link->params)
+		if (rtd->dai_link->dynamic || rtd->dai_link->params ||
+		    rtd->dai_link->dynamic_be)
 			continue;
 
 		dapm_connect_dai_link_widgets(card, rtd);

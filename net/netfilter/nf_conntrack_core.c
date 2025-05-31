@@ -54,8 +54,17 @@
 #include <net/netfilter/nf_nat.h>
 #include <net/netfilter/nf_nat_core.h>
 #include <net/netfilter/nf_nat_helper.h>
+#ifdef CONFIG_HW_FORWARD
+#include <soc/samsung/hw_forward.h>
+#endif
 #include <net/netns/hash.h>
 #include <net/ip.h>
+
+// SEC_PRODUCT_FEATURE_KNOX_SUPPORT_NPA {
+#ifdef CONFIG_KNOX_NCM
+#include <net/ncm.h>
+#endif
+// SEC_PRODUCT_FEATURE_KNOX_SUPPORT_NPA }
 
 #include "nf_internals.h"
 
@@ -470,6 +479,16 @@ static void nf_ct_add_to_dying_list(struct nf_conn *ct)
 {
 	struct ct_pcpu *pcpu;
 
+	// SEC_PRODUCT_FEATURE_KNOX_SUPPORT_NPA {
+#ifdef CONFIG_KNOX_NCM
+	/* Add 'del_timer(&ct->npa_timeout)' if struct nf_conn->timeout is of type struct timer_list; */
+	/* send dying conntrack entry to collect data */
+	if ( (check_ncm_flag()) && (ct != NULL) && (atomic_read(&ct->startFlow)) ) {
+		knox_collect_conntrack_data(ct, NCM_FLOW_TYPE_CLOSE, 10);
+	}
+#endif
+	// SEC_PRODUCT_FEATURE_KNOX_SUPPORT_NPA }
+
 	/* add this conntrack to the (per cpu) dying list */
 	ct->cpu = smp_processor_id();
 	pcpu = per_cpu_ptr(nf_ct_net(ct)->ct.pcpu_lists, ct->cpu);
@@ -620,6 +639,10 @@ static void nf_ct_delete_from_lists(struct nf_conn *ct)
 bool nf_ct_delete(struct nf_conn *ct, u32 portid, int report)
 {
 	struct nf_conn_tstamp *tstamp;
+
+#ifdef CONFIG_HW_FORWARD
+	hw_forward_delete(ct);
+#endif
 
 	if (test_and_set_bit(IPS_DYING_BIT, &ct->status))
 		return false;
@@ -1197,6 +1220,7 @@ static void gc_worker(struct work_struct *work)
 	unsigned int i, hashsz, nf_conntrack_max95 = 0;
 	unsigned long next_run = GC_SCAN_INTERVAL;
 	struct conntrack_gc_work *gc_work;
+
 	gc_work = container_of(work, struct conntrack_gc_work, dwork.work);
 
 	i = gc_work->next_bucket;
@@ -1230,6 +1254,16 @@ static void gc_worker(struct work_struct *work)
 			if (nf_ct_is_expired(tmp)) {
 				nf_ct_gc_expired(tmp);
 				continue;
+			// SEC_PRODUCT_FEATURE_KNOX_SUPPORT_NPA {
+#ifdef CONFIG_KNOX_NCM
+			} else if ( (tmp != NULL) && (check_ncm_flag()) && (check_intermediate_flag()) && (atomic_read(&tmp->startFlow)) && (atomic_read(&tmp->intermediateFlow)) ) {
+				s32 npa_timeout = tmp->npa_timeout - ((u32)(jiffies));
+				if (npa_timeout <= 0) {
+					tmp->npa_timeout = ((u32)(jiffies)) + (get_intermediate_timeout() * HZ);
+					knox_collect_conntrack_data(tmp, NCM_FLOW_TYPE_INTERMEDIATE, 20);
+				}
+#endif
+			// SEC_PRODUCT_FEATURE_KNOX_SUPPORT_NPA }
 			}
 
 			if (nf_conntrack_max95 == 0 || gc_worker_skip_ct(tmp))
@@ -1301,6 +1335,12 @@ __nf_conntrack_alloc(struct net *net,
 {
 	struct nf_conn *ct;
 
+	// SEC_PRODUCT_FEATURE_KNOX_SUPPORT_NPA {
+#ifdef CONFIG_KNOX_NCM
+	struct timespec open_timespec;
+#endif
+	// SEC_PRODUCT_FEATURE_KNOX_SUPPORT_NPA }
+
 	/* We don't want any race condition at early drop stage */
 	atomic_inc(&net->ct.count);
 
@@ -1324,12 +1364,41 @@ __nf_conntrack_alloc(struct net *net,
 		goto out;
 
 	spin_lock_init(&ct->lock);
+	// SEC_PRODUCT_FEATURE_KNOX_SUPPORT_NPA {
+#ifdef CONFIG_KNOX_NCM
+	/* initialize the conntrack structure members when memory is allocated */
+	if (ct != NULL) {
+		open_timespec = current_kernel_time();
+		ct->open_time = open_timespec.tv_sec;
+		ct->knox_uid = 0;
+		ct->knox_pid = 0;
+		memset(ct->process_name,'\0',sizeof(ct->process_name));
+		memset(ct->domain_name,'\0',sizeof(ct->domain_name));
+		ct->knox_puid = 0;
+		ct->knox_ppid = 0;
+		memset(ct->parent_process_name,'\0',sizeof(ct->parent_process_name));
+		ct->knox_sent = 0;
+		ct->knox_recv = 0;
+		memset(ct->interface_name,'\0',sizeof(ct->interface_name));
+		atomic_set(&ct->startFlow, 0);
+		/* Use 'ct->npa_timeout = 0' if struct nf_conn->timeout is of type u32;
+		   Use 'setup_timer(&ct->npa_timeout, death_by_timeout_npa, (unsigned long)ct)' if struct nf_conn->timeout is of type struct timer_list; */
+		ct->npa_timeout = 0;
+		atomic_set(&ct->intermediateFlow, 0);
+	}
+#endif
+	// SEC_PRODUCT_FEATURE_KNOX_SUPPORT_NPA }
+
 	ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple = *orig;
 	ct->tuplehash[IP_CT_DIR_ORIGINAL].hnnode.pprev = NULL;
 	ct->tuplehash[IP_CT_DIR_REPLY].tuple = *repl;
 	/* save hash for reusing when confirming */
 	*(unsigned long *)(&ct->tuplehash[IP_CT_DIR_REPLY].hnnode.pprev) = hash;
 	ct->status = 0;
+#ifdef CONFIG_HW_FORWARD
+	ct->packet_count = 0;
+	ct->forward_registered = false;
+#endif
 	write_pnet(&ct->ct_net, net);
 	memset(&ct->__nfct_init_offset, 0,
 	       offsetof(struct nf_conn, proto) -
@@ -1370,6 +1439,7 @@ void nf_conntrack_free(struct nf_conn *ct)
 	nf_ct_ext_free(ct);
 	kmem_cache_free(nf_conntrack_cachep, ct);
 	smp_mb__before_atomic();
+
 	atomic_dec(&net->ct.count);
 }
 EXPORT_SYMBOL_GPL(nf_conntrack_free);
@@ -1401,6 +1471,11 @@ init_conntrack(struct net *net, struct nf_conn *tmpl,
 	zone = nf_ct_zone_tmpl(tmpl, skb, &tmp);
 	ct = __nf_conntrack_alloc(net, zone, tuple, &repl_tuple, GFP_ATOMIC,
 				  hash);
+
+#ifdef CONFIG_HW_FORWARD
+	ct->netdev = skb->dev;
+#endif
+
 	if (IS_ERR(ct))
 		return (struct nf_conntrack_tuple_hash *)ct;
 

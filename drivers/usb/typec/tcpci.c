@@ -187,6 +187,8 @@ static int tcpci_get_cc(struct tcpc_dev *tcpc,
 	ret = regmap_read(tcpci->regmap, TCPC_CC_STATUS, &reg);
 	if (ret < 0)
 		return ret;
+	pr_info("%s: CC_STATUS=0x%x ROLE_CTRL=0x%x\n", __func__, reg,
+			role_control);
 
 	*cc1 = tcpci_to_typec_cc((reg >> TCPC_CC_STATUS_CC1_SHIFT) &
 				 TCPC_CC_STATUS_CC1_MASK,
@@ -378,10 +380,6 @@ static int tcpci_init(struct tcpc_dev *tcpc)
 	}
 	if (time_after(jiffies, timeout))
 		return -ETIMEDOUT;
-
-	ret = tcpci_write16(tcpci, TCPC_FAULT_STATUS, TCPC_FAULT_STATUS_ALL_REG_RST_TO_DEFAULT);
-	if (ret < 0)
-		return ret;
 
 	/* Handle vendor init */
 	if (tcpci->data->init) {
@@ -605,7 +603,7 @@ static int tcpci_remove(struct i2c_client *client)
 	/* Disable chip interrupts before unregistering port */
 	err = tcpci_write16(chip->tcpci, TCPC_ALERT_MASK, 0);
 	if (err < 0)
-		dev_warn(&client->dev, "Failed to disable irqs (%pe)\n", ERR_PTR(err));
+		return err;
 
 	tcpci_unregister_port(chip->tcpci);
 
